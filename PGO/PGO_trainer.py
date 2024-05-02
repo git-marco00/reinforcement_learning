@@ -105,7 +105,7 @@ class PGO_trainer():
         PATH = os.path.abspath(__file__)
         x = range(0, self.episodes)
         plt.plot(x, self.scores)
-        plt.savefig(f"PGO/{self.mode}_{self.env.unwrapped.spec.id}.png")
+        plt.savefig(f"PGO/res/{self.mode}_{self.env.unwrapped.spec.id}.png")
     
     def test(self, env, n_episodes=5):
         for i in range (n_episodes):

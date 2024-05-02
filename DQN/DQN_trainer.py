@@ -111,7 +111,7 @@ class DQN_trainer():
         PATH = os.path.abspath(__file__)
         x = range(0, self.episodes)
         plt.plot(x, self.scores)
-        plt.savefig(f"DQN/{self.env.unwrapped.spec.id}_{self.loss_mode}.png")
+        plt.savefig(f"DQN/res/{self.env.unwrapped.spec.id}_{self.loss_mode}.png")
 
 
             
