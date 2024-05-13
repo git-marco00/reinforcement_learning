@@ -1,6 +1,6 @@
 import gymnasium as gym
-from policy_network import Policy
-from Q_Network import Q_network
+from networks.policy_network import Policy
+from networks.Q_Network import Q_network
 import random
 from tqdm import trange
 import torch
