@@ -29,7 +29,9 @@ class Policy_Network(nn.Module):
 	def forward(self, x):
 		x = F.relu(self.layer1(x))
 		x = F.relu(self.layer2(x))
-		x = F.sigmoid(self.layer3(x))
+		x = F.sigmoid(self.layer3(x))	# [0,1] => [0, 1.5] => [-0.5, 1]
+
+
 		return x[:, :self.out_size] * self.scale_factor + self.bias_factor, x[:, self.out_size:] + 0.01
 		
 	def __str__(self):

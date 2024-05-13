@@ -36,7 +36,9 @@ class Reinforce():
 				self.reward_buffer.append([])
 
 				state = self.env.reset()[0]
+				state[5] *= 2.5
 				state = torch.tensor(state)
+
 				
 				truncated = False
 				terminated = False
@@ -58,6 +60,8 @@ class Reinforce():
 					self.state_buffer[traj].append(state)
 					self.action_buffer[traj].append(action)
 					self.reward_buffer[traj].append(reward)
+
+					new_state[5] *= 2.5
 
 					state = torch.tensor(new_state)
 				
@@ -121,6 +125,7 @@ class Reinforce():
 			truncated = False
 			terminated = False
 			state = env.reset()[0]
+			state[5] *= 2.5
 			state = torch.Tensor(state)
 			while not (truncated or terminated):
 				means, stds = self.policy_network(state.unsqueeze(0))
@@ -133,6 +138,8 @@ class Reinforce():
 				action = distr.sample()	# returns a tensor
 
 				new_state, reward, terminated, truncated, _ = env.step(action.numpy())	# tensor => numpy array
+
+				new_state[5] *= 2.5
 
 				state = torch.tensor(new_state)
 						
