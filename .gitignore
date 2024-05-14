@@ -3,4 +3,5 @@
 DQN/__pycache__
 PGO/__pycache__
 PGO/networks/__pycache__
+PGO/algorithms/networks/__pycache__
 PGO/res/LunarLander-v2_PGA_Reinforce.pt
