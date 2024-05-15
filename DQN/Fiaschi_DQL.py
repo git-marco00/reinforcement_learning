@@ -59,7 +59,7 @@ class DeepAgent(ABC):
 		self.episodes = episodes
 		self.gamma = gamma
 		self.replay_frequency = replay_frequency
-		#self.target_model_update_rate = target_model_update_rate
+		self.target_model_update_rate = target_model_update_rate
 		self.mini_batches = mini_batches
 		self.score = []
 		self.epsilon_record = []
@@ -126,8 +126,6 @@ class DeepAgent(ABC):
 	
 	
 	def experience_replay(self):
-			"""
-			
 			if len(self.memory) < self.train_start:
 				return
 	
@@ -197,7 +195,9 @@ class DeepAgent(ABC):
 			next_state_values = torch.zeros((self.batch_size,1))
 			
 			with torch.no_grad():
-				next_state_values[not_done_batch] = self.q_value_arrival_state(next_state_batch[not_done_batch,:])
+				state = next_state_batch[not_done_batch,:]
+				actions = torch.argmax(self.model(states), dim = 1).unsqueeze(1)
+				next_state_values[not_done_batch] = self.target_model(states).gather(1, actions)
 				target_values = reward_batch + self.gamma * next_state_values
 
 			self.model.train()
@@ -211,11 +211,11 @@ class DeepAgent(ABC):
 			self.optimizer.step()
 			
 			self.model.eval()
-				
+			"""
 			
 			
 	def learn(self):
-		for e in tqdm(np.arange(episodes), desc="Learning"):
+		for e in tqdm(np.arange(self.episodes), desc="Learning"):
 		
 			if len(self.score) >= self.early_stopping_window and np.mean(self.score[-self.early_stopping_window:]) >= self.threshold:
 				break
@@ -248,7 +248,8 @@ class DeepAgent(ABC):
 				if (step & self.replay_frequency) == 0:
 					for i in np.arange(mini_batches):
 						self.experience_replay()
-						self.target_model.load_state_dict(self.model.state_dict())
+						#self.target_model.load_state_dict(self.model.state_dict())
+						self.update_target_model(self.target_model_update_rate)
 
 				if done:								
 					self.update_epsilon()
@@ -329,7 +330,7 @@ if __name__ == '__main__':
 	env = 'LunarLander-v2'
 	#agent_type = "DDDQN"
 	agent_type = "DQN"
-	episodes = 100
+	episodes = 200
 	#episodes = 400
 	replay_frequency = 3
 	#replay_frequency = 7
@@ -352,7 +353,7 @@ if __name__ == '__main__':
 	
 	agent = DQNA(env, epsilon_start, epsilon_decay, epsilon_min, episodes, gamma, learning_rate, batch_size, train_start,
 				replay_frequency, target_model_update_rate, memory_length, mini_batches, agent_type, early_stopping_window, threshold,
-				mode = "simple_DQN")
+				mode = "double_DQN")
 	
 
 	score_file = os.getcwd()+"\DQN\\res\\DDQN_score_Fiaschi.png"
