@@ -62,6 +62,7 @@ class PGO_trainer():
                 action = self.actor_action_selection(state.unsqueeze(0), eps).squeeze()
 
                 #action = self.critic_action_selection(state.unsqueeze(0), eps)   
+
                 
                 new_state, reward, terminated, truncated, _ = self.env.step(action.item())
 
@@ -124,7 +125,7 @@ class PGO_trainer():
             q_values = torch.gather(q_values_all_actions, 1, actions_batch.unsqueeze(dim=1)).squeeze()
     
         loss = - log_probs_batch * q_values
-
+        
         self.actor_optim.zero_grad()
         loss.mean().backward()
         torch.nn.utils.clip_grad_norm_(self.actor_network.parameters(), max_norm=1.0)
@@ -211,13 +212,13 @@ class PGO_trainer():
 env = gym.make('LunarLander-v2')
 gamma = 0.99
 episodes = 1000
-actor_lr = 1e-5
-critic_lr=1e-3
+actor_lr = 1e-4
+critic_lr=1e-4
 buffer_max_len = 100000
-steps2opt = 2
+steps2opt = 4
 steps2converge = 4
 mode = "simple_DQN"
-batch_size = 64
+batch_size = 1024
 target_model_update_rate = 5e-3
 
 

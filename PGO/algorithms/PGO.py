@@ -1,7 +1,7 @@
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import os
-from networks.lunar_network import PolicyNetwork
+from networks.actor_network import Actor
 from tqdm import trange
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -10,24 +10,26 @@ import numpy as np
 class Reinforce():
 	def __init__(self, env, lr, n_trajectories, n_episodes, gamma):
 		self.env = env
-		self.n_actions = self.env.action_space.shape[0]
+		self.n_actions = self.env.action_space.n
 		self.n_states = self.env.observation_space.shape[0]
 		self.lr = lr
 		self.n_trajectories = n_trajectories
 		self.n_episodes = n_episodes
 		self.gamma = gamma
 
-		self.policy_network = PolicyNetwork(n_states=self.n_states, n_actions=self.n_actions)
+		self.policy_network = Actor(n_states=self.n_states, n_actions=self.n_actions)
 		self.optimizer = torch.optim.Adam(params = self.policy_network.parameters(), lr = self.lr)
 
 		self.scores = []
+		self.loss_history=[]
 
 		self.state_buffer = []
 		self.action_buffer = []
 		self.reward_buffer = []
 
 	def train(self):
-		for ep in trange(self.n_episodes):
+		t = trange(self.n_episodes)
+		for ep in t:
 			episode_scores = []
 			for traj in range(self.n_trajectories):
 
@@ -39,21 +41,18 @@ class Reinforce():
 				state[5] *= 2.5
 				state = torch.tensor(state)
 
-				
 				truncated = False
 				terminated = False
 				episode_scores.append(0)
+				
 				while not (truncated or terminated):
-					means, stds = self.policy_network(state.unsqueeze(0))
+					prob = self.policy_network(state.unsqueeze(0))
 
-					means = means.squeeze()
-					stds = stds.squeeze()
-
-					distr = MultivariateNormal(means, torch.diag(stds))
+					distr = torch.distributions.Categorical(prob)
 					
 					action = distr.sample()	# returns a tensor
 
-					new_state, reward, terminated, truncated, _ = self.env.step(action.numpy())	# tensor => numpy array
+					new_state, reward, terminated, truncated, _ = self.env.step(action.item())	# tensor => numpy array
 
 					episode_scores[-1]+=reward
 
@@ -67,6 +66,7 @@ class Reinforce():
 				
 			
 			self.scores.append(np.mean(episode_scores))
+			t.set_description(f"Episode score: {round(np.mean(episode_scores), 2)}")
 			episode_scores.clear()
 
 			self.compute_returns()
@@ -95,21 +95,18 @@ class Reinforce():
 			self.reward_buffer[i] = torch.stack(self.reward_buffer[i])
 
 		state_batch = torch.cat(self.state_buffer, 0)		# => Torch.size([1858, 8])
-		action_batch = torch.cat(self.action_buffer, 0)
+		action_batch = torch.cat(self.action_buffer, 0).squeeze()
 		reward_batch = torch.cat(self.reward_buffer, 0).squeeze()
-
-		means, stds = self.policy_network(state_batch)
-		stds_diags = torch.Tensor(stds.shape[0], 2, 2)
-		for i in range(stds.shape[0]):
-			stds_diags[i] = torch.diag(stds[i])
+        
+		probs = self.policy_network(state_batch)
+		distr = torch.distributions.Categorical(probs)
 		
-		m = MultivariateNormal(means, stds_diags)
+		log_probs = distr.log_prob(action_batch)	
 		
-		log_probs = m.log_prob(action_batch)	
-
 		loss = -log_probs * reward_batch	# torch.Size([1589])
 
 		self.optimizer.zero_grad()
+		self.loss_history.append(loss.mean().item())
 		loss.mean().backward()
 		self.optimizer.step()
 				
@@ -118,7 +115,11 @@ class Reinforce():
 		PATH = os.path.abspath(__file__)
 		x = range(0, self.n_episodes)
 		plt.plot(x, self.scores)
-		plt.savefig(f"PGO/res/{self.env.unwrapped.spec.id}.png")
+		plt.savefig(f"PGO/res/my_PGO_score.png")
+		plt.clf()
+
+		plt.plot(self.loss_history)
+		plt.savefig(f"PGO/res/my_PGO_loss.png")
 
 	def test(self, env, n_episodes=5):
 		for i in range (n_episodes):
@@ -146,35 +147,11 @@ class Reinforce():
 num_cores = 8
 torch.set_num_interop_threads(num_cores) # Inter-op parallelism
 torch.set_num_threads(num_cores) # Intra-op parallelism
-env = gym.make('LunarLander-v2', continuous = True, render_mode=None)
-trainer = Reinforce(env=env, lr=3e-3, n_trajectories=15, n_episodes=400, gamma=0.99)
+env = gym.make('LunarLander-v2', render_mode=None)
+trainer = Reinforce(env=env, lr=5e-3, n_trajectories=15, n_episodes=400, gamma=0.99)
 trainer.train()
 trainer.plot_rewards()
 env.close()
-env = gym.make('LunarLander-v2', continuous = True, render_mode="human")
+env = gym.make('LunarLander-v2', render_mode="human")
 trainer.test(env, n_episodes=5)
 env.close()
-
-
-
-
-
-
-
-				
-
-
-
-					
-		
-
-                
-        
-
-                
-			
-
-
-
-
-
