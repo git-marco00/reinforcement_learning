@@ -12,6 +12,6 @@ class Actor(torch.nn.Module):
     def forward(self, x):
         x = F.relu(self.layer1(x))
         x = F.relu(self.layer2(x))
-        x = F.sigmoid(self.layer3(x))
+        x = self.layer3(x)
         return self.softmax(x)
 
