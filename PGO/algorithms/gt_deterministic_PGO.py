@@ -1,7 +1,7 @@
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import os
-from networks.actor_network import Actor
+from networks.deterministic_network import Deterministic_Network
 from tqdm import trange
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -10,14 +10,14 @@ import numpy as np
 class Reinforce():
 	def __init__(self, env, lr, n_trajectories, n_episodes, gamma):
 		self.env = env
-		self.n_actions = self.env.action_space.n
+		self.n_actions = self.env.action_space.shape[0]
 		self.n_states = self.env.observation_space.shape[0]
 		self.lr = lr
 		self.n_trajectories = n_trajectories
 		self.n_episodes = n_episodes
 		self.gamma = gamma
 
-		self.policy_network = Actor(n_states=self.n_states, n_actions=self.n_actions)
+		self.policy_network = Deterministic_Network(n_states=self.n_states, n_actions=self.n_actions)
 		self.optimizer = torch.optim.Adam(params = self.policy_network.parameters(), lr = self.lr)
 
 		self.scores = []
@@ -38,7 +38,6 @@ class Reinforce():
 				self.reward_buffer.append([])
 
 				state = self.env.reset()[0]
-				state[5] *= 2.5
 				state = torch.tensor(state)
 
 				truncated = False
@@ -46,25 +45,18 @@ class Reinforce():
 				episode_scores.append(0)
 				
 				while not (truncated or terminated):
-					prob = self.policy_network(state.unsqueeze(0))
-
-					distr = torch.distributions.Categorical(prob)
+					actions = self.policy_network(state.unsqueeze(0)).detach().squeeze()
 					
-					action = distr.sample()	# returns a tensor
-
-					new_state, reward, terminated, truncated, _ = self.env.step(action.item())	# tensor => numpy array
-
+					new_state, reward, terminated, truncated, _ = self.env.step(actions.numpy())	# tensor => numpy array
+					
 					episode_scores[-1]+=reward
 
 					self.state_buffer[traj].append(state)
-					self.action_buffer[traj].append(action)
+					self.action_buffer[traj].append(actions)
 					self.reward_buffer[traj].append(reward)
-
-					new_state[5] *= 2.5
 
 					state = torch.tensor(new_state)
 				
-			
 			self.scores.append(np.mean(episode_scores))
 			t.set_description(f"Episode score: {round(np.mean(episode_scores), 2)}")
 			episode_scores.clear()
@@ -97,13 +89,10 @@ class Reinforce():
 		state_batch = torch.cat(self.state_buffer, 0)		# => Torch.size([1858, 8])
 		action_batch = torch.cat(self.action_buffer, 0).squeeze()
 		reward_batch = torch.cat(self.reward_buffer, 0).squeeze()
-        
-		probs = self.policy_network(state_batch)
-		distr = torch.distributions.Categorical(probs)
 		
-		log_probs = distr.log_prob(action_batch)	
+		reward_batch = reward_batch.unsqueeze(1).expand(-1, 2)	
 		
-		loss = -log_probs * reward_batch	# torch.Size([1589])
+		loss = -action_batch * reward_batch
 
 		self.optimizer.zero_grad()
 		self.loss_history.append(loss.mean().item())
@@ -115,11 +104,11 @@ class Reinforce():
 		PATH = os.path.abspath(__file__)
 		x = range(0, self.n_episodes)
 		plt.plot(x, self.scores)
-		plt.savefig(f"PGO/res/my_PGO_score_128.png")
+		plt.savefig(f"PGO/res/dt_deterministic_PGO_score_128.png")
 		plt.clf()
 
 		plt.plot(self.loss_history)
-		plt.savefig(f"PGO/res/my_PGO_loss_128.png")
+		plt.savefig(f"PGO/res/gt_deterministic_PGO_loss_128.png")
 
 	def test(self, env, n_episodes=5):
 		for i in range (n_episodes):
@@ -147,7 +136,7 @@ class Reinforce():
 num_cores = 8
 torch.set_num_interop_threads(num_cores) # Inter-op parallelism
 torch.set_num_threads(num_cores) # Intra-op parallelism
-env = gym.make('LunarLander-v2', render_mode=None)
+env = gym.make('LunarLander-v2', render_mode=None, continuous=True)
 trainer = Reinforce(env=env, lr=1e-3, n_trajectories=15, n_episodes=400, gamma=0.99)
 trainer.train()
 trainer.plot_rewards()
