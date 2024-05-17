@@ -54,8 +54,6 @@ class Reinforce():
 				step += 1
 				self.scores[-1]+=reward
 
-				self.episode = ep
-
 				state = torch.tensor(new_state)
 
 				if step % self.steps2opt == 0 and len(self.replay_buffer) > self.batch_size*2:
