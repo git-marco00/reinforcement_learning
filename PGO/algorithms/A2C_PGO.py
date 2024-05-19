@@ -38,15 +38,14 @@ class PGO_trainer():
         self.actor_network = Actor(self.n_states, self.n_actions)
         self.actor_optim = torch.optim.Adam(params = self.actor_network.parameters(), lr = actor_lr)
 
-        # CRITIC
-        self.critic_network = Critic(input_dim=self.n_states+self.n_actions)
-        self.target_critic_network = Critic(input_dim=self.n_states + self.n_actions)
+        # CRITIC with V
+        self.critic_network = Critic(input_dim=self.n_states)
+        self.target_critic_network = Critic(input_dim=self.n_states)
         self.target_critic_network.load_state_dict(self.critic_network.state_dict())
         self.critic_optim = torch.optim.Adam(params = self.critic_network.parameters(), lr = self.critic_lr)
         self.loss_fn = torch.nn.SmoothL1Loss()
         
     def train(self):
-        step = 0
         t = trange(self.episodes)
         for ep in t:
             step = 0
@@ -70,19 +69,22 @@ class PGO_trainer():
                 distr = MultivariateNormal(means, torch.diag(stds))
 			
                 action = distr.sample()	# returns a tenso
-                
-                if step > 1000:
-                    truncated = True
         
                 new_state, reward, terminated, truncated, _ = self.env.step(action.numpy())	# tensor => numpy array
 
                 self.replay_buffer.append((state, action, new_state, reward, terminated, truncated))
 
                 self.scores[-1]+=reward
+
+                step += 1
+
+                if(step>700):
+                    truncated = True
                 
                 state = torch.tensor(new_state)
     
                 if step % self.steps2opt == 0 and len(self.replay_buffer) > self.batch_size*20:
+                    #for i in range(2):
                     self.optimize()
                         
                 if step % self.steps2converge == 0:
@@ -105,31 +107,23 @@ class PGO_trainer():
             states_batch = torch.stack(states)
             next_states_batch = torch.stack(next_states)
             rewards_batch = torch.stack(rewards)
-            terminated_batch = torch.stack(terminated)        
-            state_action_batch = torch.cat((states_batch, actions_batch), dim=1)
+            terminated_batch = torch.stack(terminated)
+            # rewards normalization
+            rewards_batch = (rewards_batch - torch.mean(rewards_batch)) / (torch.std(rewards_batch) + 1e-5)        
+
+        
 
         ############# CRITIC OPTIMIZATION #############
 
         # current batch
-        pred_q_batch = self.critic_network(state_action_batch).squeeze()
+        pred_v_batch = self.critic_network(states_batch).squeeze()
 
         # target
         with torch.no_grad():   
-            means, stds = self.actor_network(states_batch)
-            stds_diags = torch.Tensor(stds.shape[0], 2, 2)
-            for i in range(stds.shape[0]):
-                stds_diags[i] = torch.diag(stds[i])
-            
-            m = MultivariateNormal(means, stds_diags)
-			
-            next_actions_batch = m.sample()
-            next_state_next_action_batch = torch.cat((next_states_batch, next_actions_batch), dim=1)
+            next_v = self.target_critic_network(next_states_batch).squeeze()          
+            target_v_batch = rewards_batch + ~terminated_batch * self.gamma * next_v
 
-            next_q = self.target_critic_network(next_state_next_action_batch).squeeze()
-                                
-            target_q_batch = rewards_batch + ~terminated_batch * self.gamma * next_q
-
-        critic_loss = self.loss_fn(pred_q_batch, target_q_batch)
+        critic_loss = self.loss_fn(pred_v_batch, target_v_batch)
 
         self.critic_optim.zero_grad()
         critic_loss.backward()
@@ -148,7 +142,9 @@ class PGO_trainer():
 
         log_probs = m.log_prob(actions_batch)
 
-        actor_loss = - (pred_q_batch * log_probs).mean()
+        delta_t = (target_v_batch - pred_v_batch).detach()
+
+        actor_loss = - (delta_t * log_probs).mean()
 
         ############# BACKWARDS #############
 
@@ -206,8 +202,8 @@ class PGO_trainer():
 env = gym.make('LunarLander-v2', continuous = True)
 gamma = 0.99
 episodes = 200
-actor_lr = 1e-8
-critic_lr= 1e-2
+actor_lr = 1e-6
+critic_lr= 1e-5
 buffer_max_len = 500000
 steps2opt = 1
 steps2converge = 1
@@ -220,9 +216,3 @@ trainer = PGO_trainer(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_
 trainer.train()
 trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
 env.close()
-
-
-
-    
-
-    

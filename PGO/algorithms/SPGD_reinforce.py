@@ -1,7 +1,7 @@
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import os
-from networks.lunar_network import PolicyNetwork
+from networks.stochastic_network import Actor as PolicyNetwork
 from tqdm import trange
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -49,6 +49,9 @@ class Reinforce():
 
 					means = means.squeeze()
 					stds = stds.squeeze()
+
+					print(means[0].item())
+					print(stds[0].item())
 
 					distr = MultivariateNormal(means, torch.diag(stds))
 					
@@ -160,27 +163,3 @@ env.close()
 env = gym.make('LunarLander-v2', continuous = True, render_mode="human")
 trainer.test(env, n_episodes=5)
 env.close()
-
-
-
-
-
-
-
-				
-
-
-
-					
-		
-
-                
-        
-
-                
-			
-
-
-
-
-
