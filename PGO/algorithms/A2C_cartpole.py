@@ -1,12 +1,12 @@
 import gymnasium as gym
 from my_utils.Replay_buffer import ReplayBuffer
-from networks.stochastic_network import Actor, Critic
+from networks.stochastic_network import Actor_cartpole, Critic
 from tqdm import trange
 import torch
 from matplotlib import pyplot as plt
 import os
 import numpy as np
-from torch.distributions.multivariate_normal import MultivariateNormal
+from torch.distributions.categorical import Categorical
 
 
 class PGO_trainer():
@@ -29,13 +29,13 @@ class PGO_trainer():
         self.std_history = []
         self.scores = []
 
-        self.n_actions = self.env.action_space.shape[0]
-        self.n_states = self.env.observation_space.shape[0]
+        self.n_actions = 2
+        self.n_states = 4
         
         self.replay_buffer = ReplayBuffer(maxlen=buffer_max_len)
 
         # ACTOR
-        self.actor_network = Actor(self.n_states, self.n_actions)
+        self.actor_network = Actor_cartpole(self.n_states, self.n_actions)
         self.actor_optim = torch.optim.Adam(params = self.actor_network.parameters(), lr = actor_lr)
 
         # CRITIC with V
@@ -43,8 +43,8 @@ class PGO_trainer():
         self.target_critic_network = Critic(input_dim=self.n_states)
         self.target_critic_network.load_state_dict(self.critic_network.state_dict())
         self.critic_optim = torch.optim.Adam(params = self.critic_network.parameters(), lr = self.critic_lr)
-        self.loss_fn = torch.nn.SmoothL1Loss()
-
+        
+        self.loss_fn = torch.nn.MSELoss()
         self.ep = 0
         
     def train(self):
@@ -60,18 +60,12 @@ class PGO_trainer():
             self.scores.append(0)
 
             while not (truncated or terminated):
-                means, stds = self.actor_network(state.unsqueeze(0))
+                distr_params = self.actor_network(state.unsqueeze(0))
 
-                means = means.squeeze()
-                stds = stds.squeeze()
-
-                self.mean_history.append(means[0].item())
-                self.std_history.append(stds[0].item())
-
-                distr = MultivariateNormal(means, torch.diag(stds))
+                distr = Categorical(distr_params)
 			
-                action = distr.sample()	# returns a tenso
-        
+                action = distr.sample().squeeze()	# returns a tenso
+
                 new_state, reward, terminated, truncated, _ = self.env.step(action.numpy())	# tensor => numpy array
 
                 self.replay_buffer.append((state, action, new_state, reward, terminated, truncated))
@@ -85,8 +79,7 @@ class PGO_trainer():
                 
                 state = torch.tensor(new_state)
     
-                if step % self.steps2opt == 0 and len(self.replay_buffer) > self.batch_size*20:
-                    #for i in range(2):
+                if step % self.steps2opt == 0 and len(self.replay_buffer) > self.batch_size*2:
                     self.optimize()
                         
                 if step % self.steps2converge == 0:
@@ -111,9 +104,7 @@ class PGO_trainer():
             rewards_batch = torch.stack(rewards)
             terminated_batch = torch.stack(terminated)
             # rewards normalization
-            rewards_batch = (rewards_batch - torch.mean(rewards_batch)) / (torch.std(rewards_batch) + 1e-5)        
-
-        
+            #rewards_batch = (rewards_batch - torch.mean(rewards_batch)) / (torch.std(rewards_batch) + 1e-5)        
 
         ############# CRITIC OPTIMIZATION #############
 
@@ -133,25 +124,18 @@ class PGO_trainer():
         self.critic_loss_history.append(critic_loss.item())
 
         ############# ACTOR OPTIMIZATION #############
-        if self.ep > 200:
-            means, stds = self.actor_network(states_batch)
+        if self.ep > 100:
+
+            distr_params = self.actor_network(states_batch)
             
-            stds_diags = torch.Tensor(stds.shape[0], 2, 2)
-            for i in range(stds.shape[0]):
-                stds_diags[i] = torch.diag(stds[i])
-            
-            m = MultivariateNormal(means, stds_diags)
+            m = Categorical(distr_params)
 
             log_probs = m.log_prob(actions_batch)
 
-            # current batch
-            pred_v_batch = self.critic_network(states_batch).squeeze()
-
-            # target
+            """pred_v_batch = self.critic_network(states_batch).squeeze()
             with torch.no_grad():   
                 next_v = self.target_critic_network(next_states_batch).squeeze()          
-                target_v_batch = rewards_batch + ~terminated_batch * self.gamma * next_v
-
+                target_v_batch = rewards_batch + ~terminated_batch * self.gamma * next_v"""
 
             delta_t = (target_v_batch - pred_v_batch).detach()
 
@@ -210,13 +194,13 @@ class PGO_trainer():
    
 
 # PARAMETERS
-env = gym.make('LunarLander-v2', continuous = True)
+env = gym.make('CartPole-v1')
 gamma = 0.99
-episodes = 1000
+episodes = 5000
 actor_lr = 0.001
 critic_lr= 0.001
 buffer_max_len = 500000
-steps2opt = 10
+steps2opt = 5
 steps2converge = 10
 mode = "double_DQN"
 batch_size = 32
