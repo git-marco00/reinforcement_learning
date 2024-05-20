@@ -23,9 +23,9 @@ class Deterministic_Policy(torch.nn.Module):
     
 class Compatible_Deterministic_Q(torch.nn.Module):
 
-    def __init__(self, input_dim):
+    def __init__(self, action_dim):
         super().__init__()
-        self.layer1 = torch.nn.Linear(input_dim, 1)
+        self.layer1 = torch.nn.Linear(action_dim, 1)
 
     def forward(self, x):
         return self.layer1(x)

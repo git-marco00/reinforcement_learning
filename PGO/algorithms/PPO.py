@@ -141,9 +141,9 @@ class PPO():
         
 def main():
     ############## Hyperparameters ##############
-    env_name = "LunarLander-v2"
+    env_name = "CartPole-v1"
     # creating environment
-    env = gym.make(env_name, continuous = True)
+    env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = 4
     render = False

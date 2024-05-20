@@ -22,7 +22,7 @@ class Reinforce():
 		self.batch_size = batch_size
 
 		self.replay_buffer = ReplayBuffer(maxlen=buffer_max_len)
-		self.Q = Compatible_Deterministic_Q(input_dim = self.n_states+self.n_actions)
+		self.Q = Compatible_Deterministic_Q(input_dim = self.n_actions)
 		self.policy = Deterministic_Policy(n_states=self.n_states, n_actions=self.n_actions)
 
 		self.Q_optim = torch.optim.Adam(params = self.Q.parameters(), lr = self.Q_lr)
@@ -78,27 +78,10 @@ class Reinforce():
 
 		state_action_batch = torch.cat((states_batch, actions_batch), dim=1)
 		
-		################## Q OPTIMIZATION ##################
-		
-		# current batch
-		# compatible function : Q(s,a) = a' * grad(mu_theta(s))
-		q_batch = self.Q(state_action_batch).squeeze()	# Qw(st,at)
-		
-		with torch.no_grad():
-			next_action_batch = self.policy(next_states_batch)
-			next_state_next_action_batch = torch.cat((next_states_batch, next_action_batch), dim=1)
-			target_q_batch = self.Q(next_state_next_action_batch).squeeze()
-			target_q_batch = rewards_batch + ~terminated_batch*self.gamma*target_q_batch		# Qw(st+1, mu(st+1)) 
-			
-		# target = rt + gamma*Qw(st+1, mu(st+1)) , pred = Qw(st,at)
-		Q_loss = self.loss(target_q_batch, q_batch)
-		
 		# ################ POLICY OPTIMIZATION ####################
-		new_actions_batch = self.policy(states_batch)
-		state_new_actions_batch = torch.cat((states_batch, new_actions_batch), dim=1)
-		policy_loss = self.Q(state_new_actions_batch)
-		policy_loss = - policy_loss.squeeze().mean()
-
+		q_pred = 
+		
+		
 		################## BACKWARDS #########################
 		self.policy_optim.zero_grad()
 		policy_loss.backward()

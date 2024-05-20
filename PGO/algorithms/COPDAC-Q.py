@@ -1,137 +1,321 @@
-import gymnasium as gym
-import matplotlib.pyplot as plt
-import os
-from networks.deterministic_network import Compatible_Deterministic_Q, Deterministic_Policy
-from tqdm import trange
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.distributions import Normal
+
+import gymnasium as gym
+from tqdm import trange
 import numpy as np
-from my_utils.Replay_buffer import ReplayBuffer
+from collections import deque
 import random
-
-class Reinforce():
-	def __init__(self, env, Q_lr, policy_lr, n_episodes, gamma, buffer_max_len, steps2opt, batch_size):
-		self.env = env
-		self.n_actions = self.env.action_space.shape[0]
-		self.n_states = self.env.observation_space.shape[0]
-		self.Q_lr = Q_lr
-		self.policy_lr = policy_lr
-		self.n_episodes = n_episodes
-		self.gamma = gamma
-		self.buffer_max_len = buffer_max_len
-		self.steps2opt = steps2opt
-		self.batch_size = batch_size
-
-		self.replay_buffer = ReplayBuffer(maxlen=buffer_max_len)
-		self.Q = Compatible_Deterministic_Q(input_dim = self.n_states+self.n_actions)
-		self.target_Q = Compatible_Deterministic_Q(input_dim = self.n_states+self.n_actions)
-		self.target_Q.load_state_dict(self.Q.state_dict())
-		self.policy = Deterministic_Policy(n_states=self.n_states, n_actions=self.n_actions)
-
-		self.Q_optim = torch.optim.Adam(params = self.Q.parameters(), lr = self.Q_lr)
-		self.policy_optim = torch.optim.Adam(params = self.policy.parameters(), lr = self.policy_lr)
-		self.loss = torch.nn.MSELoss()
-		
-		self.scores = []
-		self.Q_loss_history=[]
-		self.policy_loss_history=[]
-
-	def train(self):
-		step = 0
-		t = trange(self.n_episodes)
-		for ep in t:
-			state = self.env.reset()[0]
-			state = torch.tensor(state)
-
-			truncated = False
-			terminated = False
-
-			self.scores.append(0)
-
-			while not (truncated or terminated):
-				actions = self.policy(state.unsqueeze(0)).detach().squeeze()
-
-				new_state, reward, terminated, truncated, _ = self.env.step(actions.numpy())    # tensor => numpy array
-				
-				self.replay_buffer.append((state, actions, new_state, reward, terminated, truncated))
-				step += 1
-				self.scores[-1]+=reward
-
-				state = torch.tensor(new_state)
-
-				if step % self.steps2opt == 0 and len(self.replay_buffer) > self.batch_size*2:
-					self.optimize()
-					self.target_Q.load_state_dict(self.Q.state_dict())
-				
-			t.set_description(f"Episode score: {round(self.scores[-1], 2)}")
-		
-	def optimize(self):
-		batch = self.replay_buffer.sample(sample_size=self.batch_size)
-
-		states = [x[0] for x in batch]
-		actions = [x[1] for x in batch]
-		next_states = [torch.tensor(x[2]) for x in batch]
-		rewards = [torch.tensor(x[3], dtype=torch.float32) for x in batch]
-		terminated = [torch.tensor(x[4]) for x in batch]
-		
-		actions_batch = torch.stack(actions)
-		states_batch = torch.stack(states)
-		next_states_batch = torch.stack(next_states)
-		rewards_batch = torch.stack(rewards)
-		terminated_batch = torch.stack(terminated)
-
-		state_action_batch = torch.cat((states_batch, actions_batch), dim=1)
-		
-		################## Q OPTIMIZATION ##################
-		
-		# current batch
-		q_batch = self.Q(state_action_batch).squeeze()	# Qw(st,at)
-		
-		with torch.no_grad():
-			next_action_batch = self.policy(next_states_batch)
-			next_state_next_action_batch = torch.cat((next_states_batch, next_action_batch), dim=1)
-			target_q_batch = self.target_Q(next_state_next_action_batch).squeeze()
-			target_q_batch = rewards_batch + ~terminated_batch*self.gamma*target_q_batch		# Qw(st+1, mu(st+1)) 
-			
-		# target = rt + gamma*Qw(st+1, mu(st+1)) , pred = Qw(st,at)
-		Q_loss = self.loss(target_q_batch, q_batch)
-		
-		# ################ POLICY OPTIMIZATION ####################
-		new_actions_batch = self.policy(states_batch)
-		state_new_actions_batch = torch.cat((states_batch, new_actions_batch), dim=1)
-		policy_loss = self.Q(state_new_actions_batch)
-		policy_loss = - policy_loss.squeeze().mean()
-
-		################## BACKWARDS #########################
-		self.policy_optim.zero_grad()
-		policy_loss.backward()
-		self.policy_optim.step()
-		self.policy_loss_history.append(policy_loss.item())
-
-		self.Q_optim.zero_grad()
-		Q_loss.backward()
-		self.Q_optim.step()
-		self.Q_loss_history.append(Q_loss.item())
-				
-
-	def plot_rewards(self):
-		PATH = os.path.abspath(__file__)
-		plt.plot(self.scores)
-		plt.savefig(f"PGO/res/compatible_deterministic_PGO_score.png")
-		plt.clf()
-
-		plt.plot(self.Q_loss_history)
-		plt.savefig(f"PGO/res/compatible_deterministic_PGO_critic_loss.png")
-		plt.clf()
-
-		plt.plot(self.policy_loss_history)
-		plt.savefig(f"PGO/res/compatible_deterministic_PGO_actor_loss.png")
-		plt.clf()
+from copy import deepcopy
 
 
-num_cores = 8
-torch.set_num_interop_threads(num_cores) # Inter-op parallelism
-torch.set_num_threads(num_cores) # Intra-op parallelism
-env = gym.make('LunarLander-v2', render_mode=None, continuous=True)
-trainer = Reinforce(env=env, n_episodes=500, gamma=0.99, buffer_max_len=100000, steps2opt=2, batch_size=64, policy_lr=1e-3, Q_lr=1e-3)
-trainer.train()
-trainer.plot_rewards()
+#class for the Q function
+class QFunction():
+    
+    #takes in set of parameters
+    def __init__(self, weight_vector):
+        self.w = weight_vector
+    
+    #outputs an action-state value given a state and action
+    def __call__(self, state, action):
+        
+        #action from policy μ
+        a_pred = μ(state)
+        
+        #error between given action and the action from the policy μ
+        δ = action - a_pred
+        
+        #zero the current gradient and take gradient of μ(s)
+        μ.θ.grad = None
+        a_pred.backward()
+        
+        #state-action feature
+        ϕ_sa = μ.θ.grad * δ
+        
+        #advantage of taking action a instead of the policy's action
+        Aʷ_sa = mult(ϕ_sa, self.w)
+        
+        #q value, advantage + value
+        q_val = Aʷ_sa + V(state)
+        
+        return q_val
+
+
+#class for the deterministic policy
+class DeterministicPolicy():
+    
+    #initialize set of parameters
+    def __init__(self, weight_vector):
+        self.θ = weight_vector
+    
+    #gets action
+    def __call__(self, state):
+        
+        #linear combination of parameters and state
+        action = mult(self.θ, state)
+        
+        #tanh to constrain action to be in the range of [-1, 1]
+        action = torch.tanh(action)
+        
+        return action
+    
+#class for value function
+class ValueFunction():
+    
+    #initialize set of parameters
+    def __init__(self, weight_vector):
+        self.v = weight_vector
+    
+    #get value
+    def __call__(self, state):
+        
+        #linear combination of parameters and state
+        val = mult(self.v, state)
+        
+        return val
+    
+def mult(weight_vector, feature_vector):
+    ''' Mulitplies weight vector by feature vector
+    Args:
+    - weight_vector (Tensor): vector of weights
+    - feature_vector (Tensor): vector of features
+    
+    Return:
+    - product (Tensor): product of vectors
+    
+    '''
+    
+    #Transpose weight vector and multiply by feature vector
+    product = torch.matmul(torch.transpose(weight_vector, 0, 1), feature_vector)
+    
+    #Return product
+    return product
+
+
+def update_parameters(batch, state_mean, state_std):
+    ''' Update parameters given batch of samples
+    Args:
+    - batch (Array): array of samples used to update parameters
+    - state_mean (float): normalizing mean
+    - state_std (float): normalizing standard deviation
+    '''
+    
+    #iterate through batch
+    for item in batch:
+        
+        #decompose the item
+        state, action, new_state, reward, done = item
+        
+		#normalize states
+        state = normalize_state(state, state_mean, state_std)
+        new_state = normalize_state(new_state, state_mean, state_std)
+       
+	    #convert to Tensor
+        state_tensor = torch.tensor(state)
+        new_state_tensor = torch.tensor(new_state, dtype = torch.float32).unsqueeze(1)
+
+        #policy's action
+        new_action = μ(new_state_tensor)
+
+        #td error of Q value 
+        δ = reward + γ * Q(new_state_tensor, new_action) - Q(state_tensor, action)
+
+        #calculate θ update
+        #zero gradients and get gradient of μ(s)
+        μ.θ.grad = None
+        μ(state_tensor).backward()
+
+        #get jacobian matrix
+        jacob_matrix = μ.θ.grad
+
+        #here we are using the natural gradient instead
+        #θ_update = jacob_matrix * mult(jacob_matrix, Q.w) 
+        θ_update = Q.w
+
+        #calculate w update
+        #get state-action features
+        ϕ_sa = (action - μ(state_tensor)) * jacob_matrix
+        w_update = δ.detach() * ϕ_sa.detach()
+
+        #calculate v update
+        v_update = δ * jacob_matrix
+
+        #update parameters
+        #here we set requires_grad flag to True again since we used detach to create new leaf tensor
+        μ.θ = μ.θ.detach() + α_θ * θ_update
+        μ.θ.requires_grad = True
+
+        Q.w = Q.w.detach() + αw * w_update
+        V.v = V.v.detach() + αv * v_update
+        
+#set float precision point
+torch.set_printoptions(precision=10)
+
+#discount factor
+γ = 0.99
+
+#number of episodes to run
+NUM_EPISODES = 100
+
+#max steps per episode
+MAX_STEPS = 5000
+
+#score agent needs for environment to be solved
+SOLVED_SCORE = 90
+
+#learning rate for policy
+α_θ = 0.005
+
+#learning rate for value function
+αv = 0.03
+
+#learning rate for Q function
+αw = 0.03
+
+#batch size
+BATCH_SIZE = 8
+
+#Make environments
+env = gym.make("Pendulum-v1")
+env2 = deepcopy(env)
+
+#environment parameters
+obs_space = env.observation_space.shape[0]
+action_space = env.action_space.shape[0]
+
+
+#Init weight vectors, should be matrices of dimensions (input, output)
+stdv = 1 / np.sqrt(obs_space)
+θ = torch.Tensor(np.random.uniform(low=-stdv, high=stdv, size=(obs_space, action_space)) * 0.03)
+θ.requires_grad = True
+w = torch.Tensor(np.random.uniform(low=-stdv, high=stdv, size=(obs_space, 1)) * 0.03)
+v = torch.Tensor(np.random.uniform(low=-stdv, high=stdv, size=(obs_space, 1)) * 0.03)
+
+#Init network
+μ = DeterministicPolicy(θ)
+Q = QFunction(w)
+V = ValueFunction(v)
+
+#samples = np.array(samples)
+samples = np.array([env.observation_space.sample() for _ in range(10000)])
+state_mean = np.mean(samples, axis = 0)
+state_std = np.std(samples, axis= 0) + 1.0e-6
+
+#training scores
+scores = []
+
+#policy scores
+policy_scores = []
+
+#count of total updates
+total_updates = 0
+
+#buffer used for experience replay
+replay_buffer = deque(maxlen=8000)
+
+def normalize_state(state, mean, std):
+    ''' Normalizes state with given mean and standard deviation
+    Args:
+    - state (Array): current state
+    - mean (float): normalizing mean
+    - std (float): normalizing standard deviation
+    '''
+    
+    #calculate normalized state
+    normalized = (state - mean) / std
+    
+    return normalized
+
+#run episodes
+t = trange(NUM_EPISODES)
+for episode in t:
+    
+    #reset episode state and variables
+    state = env.reset()[0]
+    state2 = env2.reset()[0]
+    
+    score = 0
+    score2 = 0
+    
+    done = False
+    done2 = False
+    
+    #iterate through episode
+    for step in range(MAX_STEPS):  
+        #sample random action from action space
+        action = env.action_space.sample()[0]
+        
+        #step env
+        new_state, reward, done, truncated, _ = env.step([action])
+
+        #track score
+        score += reward
+        
+        #push item into replay buffer
+        item = (state, action, new_state, reward, done)
+        replay_buffer.append(item)
+        
+        #every 10 steps, sample batch and update parameters
+        if step % 10 == 0 and len(replay_buffer) > BATCH_SIZE:
+            replay = random.sample(replay_buffer, BATCH_SIZE)
+            update_parameters(replay, state_mean, state_std)
+            total_updates += 1
+       
+        if done:
+            break
+        
+        state = new_state
+    
+    #track episode score
+    scores.append(score)
+    
+    
+    #iterate through testing environment, here we test our policy at current episode
+    for step in range(MAX_STEPS):
+        #env2.render()
+        
+        #normalize state and get action from policy
+        state2 = normalize_state(state2, state_mean, state_std)
+        state_tensor2 = torch.from_numpy(state2).float().unsqueeze(1)
+        action2 = μ(state_tensor2)
+        
+        #step env
+        new_state2, reward2, done2, truncated2, _ = env2.step([action2.item()])
+        
+        #track score
+        score2 += reward2
+        
+        if done2:
+            break
+            
+        state2 = new_state2
+    
+    #track score
+    policy_scores.append(score2)
+    t.set_description(f"score: {score2}")
+    
+"""testing_scores = []
+
+for _ in trange(100):
+    state = env.reset()[0]
+    done = False
+    score = 0
+    for step in range(MAX_STEPS):
+        #env.render()
+        state_tensor = torch.tensor(state).unsqueeze(1)
+        action = μ(state_tensor)
+        new_state, reward, done, info, _ = env.step([action.item()])
+        
+        score += reward
+        
+        state = new_state
+        
+        if done:
+            break
+    testing_scores.append(score)
+env.close()
+    
+np.array(testing_scores).mean()"""

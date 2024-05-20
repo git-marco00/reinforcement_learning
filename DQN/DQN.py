@@ -143,11 +143,15 @@ class PGO_trainer():
             plt.savefig("DQN/res/DDQN_loss.png")
             plt.clf()
 
+import os
+
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 
 # PARAMETERS
-env = gym.make('LunarLander-v2')
+env = gym.make('CartPole-v1')
 gamma = 0.99
-episodes = 2000
+episodes = 800
 lr = 5e-4
 buffer_max_len = int(1e5)
 steps2opt = 4

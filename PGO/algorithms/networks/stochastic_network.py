@@ -23,11 +23,11 @@ class Actor(torch.nn.Module):
         return x[:, :self.n_actions] * self.scale_factor + self.bias_factor, x[:, self.n_actions:] + 0.01
 
 class Critic(torch.nn.Module):
-    def __init__(self, input_dim, n_hidden=256):
+    def __init__(self, input_dim,output_dim, n_hidden=256):
         super().__init__()
         self.layer1 = torch.nn.Linear(input_dim, n_hidden)
         self.layer2 = torch.nn.Linear(n_hidden, n_hidden)
-        self.layer3 = torch.nn.Linear(n_hidden, 1)
+        self.layer3 = torch.nn.Linear(n_hidden, output_dim)
 
 
     def forward(self, x):
