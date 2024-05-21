@@ -7,10 +7,13 @@ import torch
 from torch.distributions.categorical import Categorical
 import numpy as np
 import os
+from collections import deque
+from statistics import mean
+import time
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 class Reinforce():
-	def __init__(self, env, lr, n_trajectories, n_episodes, gamma):
+	def __init__(self, env, lr, n_trajectories, n_episodes, gamma, solved_reward, early_stopping_window):
 		self.env = env
 		self.n_actions = 2
 		self.n_states = 4
@@ -29,10 +32,15 @@ class Reinforce():
 		self.action_buffer = []
 		self.reward_buffer = []
 		self.logprob_buffer = []
+
+		self.solved_reward = solved_reward
+		self.early_stopping_window = early_stopping_window
+		self.window = deque(maxlen=self.early_stopping_window)
 		
 		self.loss_fn = torch.nn.MSELoss()
 
 	def train(self):
+		start_timestamp = time.time()
 		t = trange(self.n_episodes)
 		for ep in t:
 			episode_scores = []
@@ -72,6 +80,16 @@ class Reinforce():
 			
 			self.scores.append(np.mean(episode_scores))
 			t.set_description(f"score: {round(np.mean(episode_scores), 2)}")
+
+			# early stopping condition
+			self.window.append(self.scores[-1])
+			if int(mean(self.window)) == self.solved_reward:
+				end_timestamp = time.time()
+				total_time = end_timestamp - start_timestamp
+				print(f"[ENVIRONMENT SOLVED in {total_time} seconds]")
+                # save model
+				t.close()
+				return
 			
 			episode_scores.clear()
 
@@ -83,6 +101,11 @@ class Reinforce():
 			self.action_buffer.clear()
 			self.reward_buffer.clear()
 			self.logprob_buffer.clear()
+		
+		# EPISODE NOT SOLVED
+		end_timestamp = time.time()
+		total_time = end_timestamp - start_timestamp
+		print(f"[ENVIRONMENT NOT SOLVED. Elapsed time: {total_time} seconds]")
 
 				
 	def compute_returns(self):
@@ -92,7 +115,6 @@ class Reinforce():
 				traj[i] = torch.Tensor([traj[i]])
 			traj[len(traj)-1]= torch.Tensor([traj[len(traj)-1]])
 
-		
 		
 	def optimize(self):
 		# self.state_buffer = [15, 104, 8]
@@ -116,10 +138,16 @@ class Reinforce():
 	def plot_rewards(self):
 		PATH = os.path.abspath(__file__)
 		plt.plot(self.scores)
+		plt.title("Score")
+		plt.xlabel("Episode")
+		plt.ylabel("Reward")
 		plt.savefig(f"PGO/res/REINFORCE/reinforce_Gt_score.png")
 		plt.clf()
 
 		plt.plot(self.loss_history)
+		plt.title("Actor loss")
+		plt.xlabel("Episode")
+		plt.ylabel("Loss")
 		plt.savefig(f"PGO/res/REINFORCE/reinforce_Gt_actor_loss.png")
 		plt.clf()
 
@@ -144,7 +172,10 @@ num_cores = 8
 torch.set_num_interop_threads(num_cores) # Inter-op parallelism
 torch.set_num_threads(num_cores) # Intra-op parallelism
 env = gym.make('CartPole-v1', render_mode=None)
-trainer = Reinforce(env=env, lr=0.001, n_trajectories=10, n_episodes=200, gamma=0.99)
+
+solved_reward = 500
+early_stopping_window = 20
+trainer = Reinforce(env=env, lr=0.001, n_trajectories=10, n_episodes=300, gamma=0.99, solved_reward=solved_reward, early_stopping_window=early_stopping_window)
 trainer.train()
 trainer.plot_rewards()
 env.close()

@@ -5,11 +5,18 @@ import gymnasium as gym
 from networks.stochastic_network import Actor, Critic
 from my_utils.Memory import Memory
 from tqdm import trange
+import os
+import numpy as np
+from matplotlib import pyplot as plt
+from collections import deque
+from statistics import mean
+import time
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class PPO():
-    def __init__(self, env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, log_interval, max_episodes, max_timesteps, update_timestep):
+    def __init__(self, env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window):
         self.env = env
         self.lr = lr
         self.betas = betas
@@ -17,21 +24,29 @@ class PPO():
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.solved_reward = solved_reward
-        self.log_interval = log_interval
         self.max_episodes = max_episodes
         self.max_timesteps = max_timesteps
         self.update_timestep = update_timestep
+        self.early_stopping_window = early_stopping_window
         self.memory = Memory()
 
-        
+        # actor
         self.policy = Actor(n_states=state_dim, n_actions=action_dim, hidden=n_latent_var).to(device)
         self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr, betas=betas)
         self.policy_old = Actor(n_states=state_dim, n_actions=action_dim, hidden=n_latent_var).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
+        
+        # critic V function
         self.critic = Critic(input_dim=state_dim, output_dim=1, n_hidden=n_latent_var)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr, betas=betas)
-
         self.MseLoss = nn.MSELoss()
+
+        # log
+        self.policy_loss_history = []
+        self.critic_loss_history = []
+        self.scores_history = []
+        self.window = deque(maxlen=self.early_stopping_window)
+        
     
     def optimize(self):   
         # Monte Carlo estimate of state rewards
@@ -77,17 +92,20 @@ class PPO():
             # optimize new policy
             self.policy_optimizer.zero_grad()
             new_policy_loss.mean().backward()
+            self.policy_loss_history.append(new_policy_loss.mean().item())
             self.policy_optimizer.step()
 
             # optimize critic
             self.critic_optimizer.zero_grad()
-            critic_loss.mean().backward()
+            critic_loss.backward()
+            self.critic_loss_history.append(critic_loss.item())
             self.critic_optimizer.step()
 
         # Copy new weights into old policy:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
     def train(self):
+        start_timestamp = time.time()
         timestep = 0
 
         # training loop
@@ -95,11 +113,11 @@ class PPO():
         for i_episode in t:
             ep_reward = 0
             state = self.env.reset()[0]
+            state = torch.tensor(state).unsqueeze(0)
             truncated = False
             terminated = False
 
             while not (truncated or terminated):
-                state = torch.tensor(state).unsqueeze(0)
                 timestep += 1
         
                 # Running policy_old:
@@ -118,7 +136,8 @@ class PPO():
                 self.memory.rewards.append(reward)
                 self.memory.is_terminals.append(terminated)
 
-                state = torch.tensor(new_state)
+                # state update
+                state = torch.tensor(new_state).unsqueeze(0)
                 
                 # update if its time
                 if timestep % self.update_timestep == 0:
@@ -130,8 +149,52 @@ class PPO():
 
                 if terminated:
                     break
-                    
+            
+            self.scores_history.append(ep_reward)
             t.set_description(f"SCORE: {round(ep_reward, 2)}")
+
+            # early stopping condition
+            self.window.append(ep_reward)
+            if int(mean(self.window)) == self.solved_reward:
+                end_timestamp = time.time()
+                total_time = end_timestamp - start_timestamp
+                print(f"[ENVIRONMENT SOLVED in {total_time} seconds]")
+                # save model
+                t.close()
+                break
+
+    def plot(self, plot_scores=True, plot_critic_loss=True, plot_actor_loss=True):
+        PATH = os.path.abspath(__file__)
+
+        if plot_scores is True:
+            window_size = 10
+            smoothed_data = np.convolve(self.scores_history, np.ones(window_size)/window_size, mode='valid')
+            plt.plot(smoothed_data)
+            plt.title("Score")
+            plt.xlabel("Episode")
+            plt.ylabel("Reward")
+            plt.savefig("PGO/res/PPO/score.png")
+            plt.clf()
+
+        if plot_critic_loss is True:
+            window_size = 5
+            smoothed_data = np.convolve(self.critic_loss_history, np.ones(window_size)/window_size, mode='valid')
+            plt.plot(smoothed_data)
+            plt.title("Value function loss")
+            plt.xlabel("Episode")
+            plt.ylabel("Loss")
+            plt.savefig("PGO/res/PPO/critic_loss.png")
+            plt.clf()
+
+        if plot_actor_loss is True:
+            window_size = 5
+            smoothed_data = np.convolve(self.policy_loss_history, np.ones(window_size)/window_size, mode='valid')
+            plt.plot(smoothed_data)
+            plt.title("Policy function loss")
+            plt.xlabel("Episode")
+            plt.ylabel("Loss")
+            plt.savefig("PGO/res/PPO/policy_loss.png")
+            plt.clf()
 
         
 def main():
@@ -142,8 +205,7 @@ def main():
     state_dim = env.observation_space.shape[0]
     action_dim = 2
     solved_reward = 500         # stop training if avg_reward > solved_reward
-    log_interval = 20           # print avg reward in the interval
-    max_episodes = 50000        # max training episodes
+    max_episodes = 3000         # max training episodes
     max_timesteps = 1000        # max timesteps in one episode
     n_latent_var = 64           # number of variables in hidden layer
     update_timestep = 2000      # update policy every n timesteps
@@ -152,10 +214,12 @@ def main():
     gamma = 0.99                # discount factor
     K_epochs = 4                # update policy for K epochs
     eps_clip = 0.2              # clip parameter for PPO
+    early_stopping_window = 20
     #############################################
     
-    ppo = PPO(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, log_interval, max_episodes, max_timesteps, update_timestep)
+    ppo = PPO(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window)
     ppo.train()
+    ppo.plot()
 
 if __name__ == '__main__':
     main()     

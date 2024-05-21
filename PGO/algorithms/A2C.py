@@ -7,10 +7,14 @@ from matplotlib import pyplot as plt
 import os
 import numpy as np
 from torch.distributions.categorical import Categorical
+from collections import deque
+from statistics import mean
+import time
+
 
 
 class PGO_trainer():
-    def __init__(self, env, gamma, episodes, actor_lr, critic_lr, buffer_max_len, steps2opt, steps2converge, mode, tau, batch_size=64, critic_bootstrap=10):
+    def __init__(self, env, gamma, episodes, actor_lr, critic_lr, buffer_max_len, steps2opt, steps2converge, mode, tau, solved_reward, early_stopping_window,batch_size=64, critic_bootstrap=10):
         self.env = env
         self.gamma = gamma
         self.episodes = episodes
@@ -23,12 +27,15 @@ class PGO_trainer():
         self.mode = mode
         self.tau = tau
         self.critic_bootstrap = critic_bootstrap
+        self.solved_reward = solved_reward
+        self.early_stopping_window = early_stopping_window
 
         self.critic_loss_history = []
         self.actor_loss_history = []
         self.mean_history = []
         self.std_history = []
         self.scores = []
+        self.window = deque(maxlen=self.early_stopping_window)
 
         self.n_actions = 2
         self.n_states = 4
@@ -56,6 +63,7 @@ class PGO_trainer():
 
         
     def train(self):
+        start_timestamp = time.time()
         t = trange(self.episodes)
         for self.ep in t:
             step = 0
@@ -94,7 +102,20 @@ class PGO_trainer():
 
 
             t.set_description(f"Episode score: {round(self.scores[-1], 2)}, critic_loss: {round(sum(self.critic_loss_history)/(len(self.critic_loss_history)+1),2)}, actor_loss: {round(sum(self.actor_loss_history)/(len(self.actor_loss_history)+1),2)}")
-        
+
+            # early stopping condition
+            self.window.append(self.scores[-1])
+            if int(mean(self.window)) == self.solved_reward:
+                end_timestamp = time.time()
+                total_time = end_timestamp - start_timestamp
+                print(f"[ENVIRONMENT SOLVED in {total_time} seconds]")
+                # save model
+                t.close()
+                return
+            
+        end_timestamp = time.time()
+        total_time = end_timestamp - start_timestamp
+        print(f"[ENVIRONMENT NOT SOLVED. Elapsed time: {total_time} seconds]")
   
     def optimize(self):
         batch = self.replay_buffer.sample(sample_size=self.batch_size)
@@ -155,24 +176,33 @@ class PGO_trainer():
         PATH = os.path.abspath(__file__)
 
         if plot_scores is True:
-            window_size = 20
+            window_size = 10
             smoothed_data = np.convolve(self.scores, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
-            plt.savefig("PGO/res/A2C/tn_scores.png")
+            plt.title("Score")
+            plt.xlabel("Episode")
+            plt.ylabel("Reward")
+            plt.savefig(f"PGO/res/A2C/{self.mode}_scores_2.png")
             plt.clf()
 
         if plot_critic_loss is True:
-            window_size = 1000
+            window_size = 500
             smoothed_data = np.convolve(self.critic_loss_history, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
-            plt.savefig("PGO/res/A2C/tn_critic_loss.png")
+            plt.title("Critic function loss")
+            plt.xlabel("Episode")
+            plt.ylabel("Loss")
+            plt.savefig(f"PGO/res/A2C/{self.mode}_critic_loss_2.png")
             plt.clf()
 
         if plot_actor_loss is True:
-            window_size = 1000
+            window_size = 500
             smoothed_data = np.convolve(self.actor_loss_history, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
-            plt.savefig("PGO/res/A2C/tn_actor_loss.png")
+            plt.title("Actor function loss")
+            plt.xlabel("Episode")
+            plt.ylabel("Loss")
+            plt.savefig(f"PGO/res/A2C/{self.mode}_actor_loss_2.png")
             plt.clf()
 
         
@@ -187,23 +217,25 @@ class PGO_trainer():
 # PARAMETERS
 env = gym.make('CartPole-v1')
 gamma = 0.99
-episodes = 500
+episodes = 1000
 actor_lr = 0.001
 critic_lr= 0.001
 buffer_max_len = 500000
 steps2opt = 5
-steps2converge = 10
+steps2converge = 5
 mode = "target_networks"
 batch_size = 32
-tau = 0.2
+tau = 0.1
 critic_bootstrap = 30
+solved_reward = 500
+early_stopping_window = 20
 
 import os
 
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 
-trainer = PGO_trainer(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, steps2opt=steps2opt, steps2converge=steps2converge, mode=mode, batch_size=batch_size, tau = tau, critic_bootstrap=critic_bootstrap)
+trainer = PGO_trainer(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, steps2opt=steps2opt, steps2converge=steps2converge, mode=mode, batch_size=batch_size, tau = tau, critic_bootstrap=critic_bootstrap, solved_reward= solved_reward, early_stopping_window = early_stopping_window)
 trainer.train()
 trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
 env.close()

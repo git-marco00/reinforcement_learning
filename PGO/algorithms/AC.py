@@ -7,10 +7,15 @@ from matplotlib import pyplot as plt
 import os
 import numpy as np
 from torch.distributions.categorical import Categorical
+import os
+from collections import deque
+from statistics import mean
+import time
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 
 class PGO_trainer():
-    def __init__(self, env, gamma, episodes, actor_lr, critic_lr, buffer_max_len, steps2opt, steps2converge, target_model_update_rate = 1e-2, batch_size=64):
+    def __init__(self, env, gamma, episodes, actor_lr, critic_lr, buffer_max_len, steps2opt, steps2converge, solved_reward, early_stopping_window,target_model_update_rate = 1e-2, batch_size=64):
         self.env = env
         self.gamma = gamma
         self.episodes = episodes
@@ -21,12 +26,15 @@ class PGO_trainer():
         self.batch_size = batch_size
         self.steps2converge = steps2converge
         self.target_model_update_rate = target_model_update_rate
+        self.solved_reward = solved_reward
+        self.early_stopping_window = early_stopping_window
 
         self.critic_loss_history = []
         self.actor_loss_history = []
         self.mean_history = []
         self.std_history = []
         self.scores = []
+        self.window = deque(maxlen=self.early_stopping_window)
 
         self.n_actions = 2
         self.n_states = 4
@@ -47,6 +55,7 @@ class PGO_trainer():
         self.ep = 0
         
     def train(self):
+        start_timestamp = time.time()
         step = 0
         t = trange(self.episodes)
         for self.ep in t:
@@ -84,8 +93,21 @@ class PGO_trainer():
                 self.optimize()
                 self.update_target_model(self.target_model_update_rate)
             t.set_description(f"Episode score: {round(self.scores[-1], 2)}, critic_loss: {round(sum(self.critic_loss_history)/(len(self.critic_loss_history)+1),2)}, actor_loss: {round(sum(self.actor_loss_history)/(len(self.actor_loss_history)+1),2)}")
+
+            # early stopping condition
+            self.window.append(self.scores[-1])
+            if int(mean(self.window)) == self.solved_reward:
+                end_timestamp = time.time()
+                total_time = end_timestamp - start_timestamp
+                print(f"[ENVIRONMENT SOLVED in {total_time} seconds]")
+                # save model
+                t.close()
+                return
+            
+        end_timestamp = time.time()
+        total_time = end_timestamp - start_timestamp
+        print(f"[ENVIRONMENT NOT SOLVED. Elapsed time: {total_time} seconds]")
         
-  
     def optimize(self):
         batch = self.replay_buffer.sample(sample_size=self.batch_size)
         
@@ -156,24 +178,33 @@ class PGO_trainer():
         PATH = os.path.abspath(__file__)
 
         if plot_scores is True:
-            window_size = 20
+            window_size = 10
             smoothed_data = np.convolve(self.scores, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
-            plt.savefig("PGO/res/AC/score_2.png")
+            plt.title("Score")
+            plt.xlabel("Episode")
+            plt.ylabel("Reward")
+            plt.savefig("PGO/res/AC/score_3.png")
             plt.clf()
 
         if plot_critic_loss is True:
             window_size = 10
             smoothed_data = np.convolve(self.critic_loss_history, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
-            plt.savefig("PGO/res/AC/critic_loss_2.png")
+            plt.title("Critic function loss")
+            plt.xlabel("Episode")
+            plt.ylabel("Loss")
+            plt.savefig("PGO/res/AC/critic_loss_3.png")
             plt.clf()
 
         if plot_actor_loss is True:
             window_size = 10
             smoothed_data = np.convolve(self.actor_loss_history, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
-            plt.savefig("PGO/res/AC/actor_loss_2.png")
+            plt.title("Actor function loss")
+            plt.xlabel("Episode")
+            plt.ylabel("Loss")
+            plt.savefig("PGO/res/AC/actor_loss_3.png")
             plt.clf()
 
         
@@ -184,10 +215,6 @@ class PGO_trainer():
             target_weights[i] = weights[i] * tau + target_weights[i] * (1-tau)
         self.target_critic_network.load_state_dict(target_weights)
    
-
-import os
-
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 # PARAMETERS
 env = gym.make('CartPole-v1')
@@ -200,9 +227,11 @@ steps2opt = 1000
 steps2converge = 1000
 batch_size = 256
 target_model_update_rate = 0.01
+solved_reward = 500
+early_stopping_window = 20
 
 
-trainer = PGO_trainer(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, steps2opt=steps2opt, steps2converge=steps2converge,  batch_size=batch_size, target_model_update_rate = target_model_update_rate)
+trainer = PGO_trainer(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, steps2opt=steps2opt, steps2converge=steps2converge,  batch_size=batch_size, target_model_update_rate = target_model_update_rate, solved_reward=solved_reward, early_stopping_window = early_stopping_window)
 trainer.train()
 trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
 env.close()
