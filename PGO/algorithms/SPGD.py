@@ -1,7 +1,7 @@
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import os
-from networks.stochastic_network import Actor_cartpole as PolicyNetwork
+from networks.stochastic_network import Actor as PolicyNetwork
 from networks.stochastic_network import Critic
 from tqdm import trange
 import torch
@@ -20,7 +20,7 @@ class Reinforce():
 
 		self.policy_network = PolicyNetwork(n_states=self.n_states, n_actions=self.n_actions)
 		self.policy_opt = torch.optim.Adam(params = self.policy_network.parameters(), lr = self.lr)
-		self.critic_network = Critic(input_dim=self.n_states)
+		self.critic_network = Critic(input_dim=self.n_states, output_dim=1)
 		self.critic_opt = torch.optim.Adam(params = self.critic_network.parameters(), lr = self.lr)
 
 		self.scores = []

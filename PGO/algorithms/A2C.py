@@ -1,6 +1,6 @@
 import gymnasium as gym
 from my_utils.Replay_buffer import ReplayBuffer
-from networks.stochastic_network import Actor_cartpole, Critic
+from networks.stochastic_network import Actor, Critic
 from tqdm import trange
 import torch
 from matplotlib import pyplot as plt
@@ -36,7 +36,7 @@ class PGO_trainer():
         self.replay_buffer = ReplayBuffer(maxlen=buffer_max_len)
 
         # ACTOR
-        self.actor_network = Actor_cartpole(self.n_states, self.n_actions)
+        self.actor_network = Actor(self.n_states, self.n_actions)
         self.actor_optim = torch.optim.Adam(params = self.actor_network.parameters(), lr = actor_lr)
         
         # CRITIC with V
@@ -47,7 +47,7 @@ class PGO_trainer():
             self.target_critic_network = Critic(input_dim=self.n_states, output_dim=1)
             self.target_critic_network.load_state_dict(self.critic_network.state_dict())
 
-            self.target_actor_network = Actor_cartpole(n_states=self.n_states, n_actions=self.n_actions)
+            self.target_actor_network = Actor(n_states=self.n_states, n_actions=self.n_actions)
             self.target_actor_network.load_state_dict(self.actor_network.state_dict())
        
         

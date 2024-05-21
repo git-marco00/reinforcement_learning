@@ -26,13 +26,16 @@ class Critic(torch.nn.Module):
     def __init__(self, input_dim,output_dim, n_hidden=256):
         super().__init__()
         self.layer1 = torch.nn.Linear(input_dim, n_hidden)
+        self.dropout = torch.nn.Dropout(p=0.6)
         self.layer2 = torch.nn.Linear(n_hidden, n_hidden)
         self.layer3 = torch.nn.Linear(n_hidden, output_dim)
 
 
     def forward(self, x):
         x = F.leaky_relu(self.layer1(x))
+        x = self.dropout(x)
         x = F.leaky_relu(self.layer2(x))
+        x = self.dropout(x)
         x = self.layer3(x)
         return x
     
@@ -40,6 +43,7 @@ class Actor(torch.nn.Module):
     def __init__(self, n_states, n_actions, hidden=256):
         super().__init__()
         self.layer1 = torch.nn.Linear(n_states, hidden)
+        self.dropout = torch.nn.Dropout(p=0.6)
         self.layer2 = torch.nn.Linear(hidden, hidden)
         self.layer3 = torch.nn.Linear(hidden, n_actions) 
         self.n_actions = n_actions
@@ -47,8 +51,10 @@ class Actor(torch.nn.Module):
         self.softmax = torch.nn.Softmax(dim=1)
 
     def forward(self, x):
-        x = F.leaky_relu(self.layer1(x))      
-        x = F.leaky_relu(self.layer2(x))      
+        x = F.leaky_relu(self.layer1(x))   
+        x = self.dropout(x)   
+        x = F.leaky_relu(self.layer2(x))  
+        x = self.dropout(x)    
         x = self.layer3(x)
         x = self.softmax(x)  
         
