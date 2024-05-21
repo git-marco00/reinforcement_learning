@@ -2,100 +2,42 @@ import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 import gymnasium as gym
+from networks.stochastic_network import Actor, Critic
+from my_utils.Memory import Memory
+from tqdm import trange
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class Memory():
-    def __init__(self):
-        self.actions = []
-        self.states = []
-        self.logprobs = []
-        self.rewards = []
-        self.is_terminals = []
-    
-    def clear_memory(self):
-        del self.actions[:]
-        del self.states[:]
-        del self.logprobs[:]
-        del self.rewards[:]
-        del self.is_terminals[:]
-
-class ActorCritic(nn.Module):
-    def __init__(self, state_dim, action_dim, n_latent_var):
-        super(ActorCritic, self).__init__()
-
-        self.state_dim = state_dim
-        self.action_dim = 2
-
-        # actor
-        self.action_layer = nn.Sequential(
-                nn.Linear(self.state_dim, n_latent_var),
-                nn.Tanh(),
-                nn.Linear(n_latent_var, n_latent_var),
-                nn.Tanh(),
-                nn.Linear(n_latent_var, self.action_dim),
-                nn.Softmax(dim=-1)
-                )
-        
-        # critic
-        self.value_layer = nn.Sequential(
-                nn.Linear(state_dim, n_latent_var),
-                nn.Tanh(),
-                nn.Linear(n_latent_var, n_latent_var),
-                nn.Tanh(),
-                nn.Linear(n_latent_var, 1)
-                )
-        
-    def forward(self):
-        raise NotImplementedError
-    
-    # for interacting with environment
-    def act(self, state, memory):
-
-        state = torch.from_numpy(state).float().to(device)
-        distr_values = self.action_layer(state)
-
-        dist = Categorical(distr_values)
-        action = dist.sample()
-        
-        memory.states.append(state)
-        memory.actions.append(action)
-        memory.logprobs.append(dist.log_prob(action))
-        
-        return action
-    
-    # for ppo update
-    def evaluate(self, state, action):
-        distr_values = self.action_layer(state)
-        dist = Categorical(distr_values)
-        
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
-        
-        state_value = self.value_layer(state)
-        # action_logprobs indirectly represents the policy $\pi_{\theta}(s,a)$
-        return action_logprobs, torch.squeeze(state_value), dist_entropy
-
 class PPO():
-    def __init__(self, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip):
+    def __init__(self, env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, log_interval, max_episodes, max_timesteps, update_timestep):
+        self.env = env
         self.lr = lr
         self.betas = betas
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
+        self.solved_reward = solved_reward
+        self.log_interval = log_interval
+        self.max_episodes = max_episodes
+        self.max_timesteps = max_timesteps
+        self.update_timestep = update_timestep
+        self.memory = Memory()
+
         
-        self.policy = ActorCritic(state_dim, action_dim, n_latent_var).to(device)
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr, betas=betas)
-        self.policy_old = ActorCritic(state_dim, action_dim, n_latent_var).to(device)
+        self.policy = Actor(n_states=state_dim, n_actions=action_dim, hidden=n_latent_var).to(device)
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr, betas=betas)
+        self.policy_old = Actor(n_states=state_dim, n_actions=action_dim, hidden=n_latent_var).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
-        
+        self.critic = Critic(input_dim=state_dim, output_dim=1, n_hidden=n_latent_var)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr, betas=betas)
+
         self.MseLoss = nn.MSELoss()
     
-    def optimize(self, memory):   
-        # Monte Carlo estimate of state rewards (can be replaced by General Advantage Estimators)
+    def optimize(self):   
+        # Monte Carlo estimate of state rewards
         rewards = []
         discounted_reward = 0
-        for reward, is_terminal in zip(reversed(memory.rewards), reversed(memory.is_terminals)):
+        for reward, is_terminal in zip(reversed(self.memory.rewards), reversed(self.memory.is_terminals)):
             if is_terminal:
                 discounted_reward = 0
             discounted_reward = reward + (self.gamma * discounted_reward)
@@ -106,32 +48,91 @@ class PPO():
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-5)
         
         # convert list to tensor
-        old_states = torch.stack(memory.states).to(device).detach()
-        old_actions = torch.stack(memory.actions).to(device).detach()
-        old_logprobs = torch.stack(memory.logprobs).to(device).detach()
-        
+        old_states = torch.cat(self.memory.states).to(device).detach()
+        old_actions = torch.stack(self.memory.actions).to(device).detach()
+        old_logprobs = torch.stack(self.memory.logprobs).to(device).detach()
+
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
-            # Evaluating old actions and values
-            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_actions)
-            
-            # Finding the ratio (pi_theta / pi_theta__old)
-            ratios = torch.exp(logprobs - old_logprobs.detach())
-            
-            # Finding Surrogate Loss (no gradient in advantages)
+            # Evaluating old actions and values with new policy
+            new_probs = self.policy(old_states)
+            new_dist = Categorical(new_probs)
+            new_logprobs = new_dist.log_prob(old_actions)
+
+            # critic
+            state_values = self.critic(old_states).squeeze()
             advantages = rewards - state_values.detach()
+
+            # Finding the ratio (pi_theta / pi_theta__old) QUESTO PASSAGGIO NASCONDE DELLA MATEMATICA !!!! => TODO: DA RIVEDERE
+            ratios = torch.exp(new_logprobs - old_logprobs.detach())
+
+            # CLIPPED SURROGATE LOSS
             surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
+            surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages.detach()
             # MseLoss is for the update of critic, dist_entropy denotes an entropy bonus
-            loss = -torch.min(surr1, surr2) + 0.5*self.MseLoss(state_values, rewards) - 0.01*dist_entropy
+            new_policy_loss = -torch.min(surr1, surr2)
+
+            critic_loss = 0.5*self.MseLoss(state_values, rewards)
             
-            # take gradient step
-            self.optimizer.zero_grad()
-            loss.mean().backward()
-            self.optimizer.step()
+            # optimize new policy
+            self.policy_optimizer.zero_grad()
+            new_policy_loss.mean().backward()
+            self.policy_optimizer.step()
+
+            # optimize critic
+            self.critic_optimizer.zero_grad()
+            critic_loss.mean().backward()
+            self.critic_optimizer.step()
 
         # Copy new weights into old policy:
         self.policy_old.load_state_dict(self.policy.state_dict())
+
+    def train(self):
+        timestep = 0
+
+        # training loop
+        t = trange(1, self.max_episodes+1)
+        for i_episode in t:
+            ep_reward = 0
+            state = self.env.reset()[0]
+            truncated = False
+            terminated = False
+
+            while not (truncated or terminated):
+                state = torch.tensor(state).unsqueeze(0)
+                timestep += 1
+        
+                # Running policy_old:
+                with torch.no_grad():
+                    probs = self.policy_old(state).squeeze()
+                    dist = Categorical(probs)
+                    action = dist.sample()
+                    log_prob = dist.log_prob(action)
+
+                new_state, reward, terminated, truncated, _ = self.env.step(action.numpy())
+
+                # memory update
+                self.memory.states.append(state)
+                self.memory.actions.append(action)
+                self.memory.logprobs.append(log_prob)
+                self.memory.rewards.append(reward)
+                self.memory.is_terminals.append(terminated)
+
+                state = torch.tensor(new_state)
+                
+                # update if its time
+                if timestep % self.update_timestep == 0:
+                    self.optimize()
+                    self.memory.clear_memory()
+                    timestep = 0
+                
+                ep_reward += reward
+
+                if terminated:
+                    break
+                    
+            t.set_description(f"SCORE: {round(ep_reward, 2)}")
+
         
 def main():
     ############## Hyperparameters ##############
@@ -139,8 +140,7 @@ def main():
     # creating environment
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
-    action_dim = 4
-    render = False
+    action_dim = 2
     solved_reward = 500         # stop training if avg_reward > solved_reward
     log_interval = 20           # print avg reward in the interval
     max_episodes = 50000        # max training episodes
@@ -152,66 +152,12 @@ def main():
     gamma = 0.99                # discount factor
     K_epochs = 4                # update policy for K epochs
     eps_clip = 0.2              # clip parameter for PPO
-    random_seed = None
     #############################################
     
-    if random_seed:
-        torch.manual_seed(random_seed)
-        env.seed(random_seed)
-    
-    memory = Memory()
-    ppo = PPO(state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip)
-    print('learning rate:',lr, 'Adam betas:', betas)
-    
-    # logging variables
-    running_reward = 0
-    avg_length = 0
-    timestep = 0
-    
-    # training loop
-    for i_episode in range(1, max_episodes+1):
-        state = env.reset()[0]
-        for t in range(max_timesteps):
-            timestep += 1
-            
-            # Running policy_old:
-            # also append state, action, action_logprobs to the memory
-            with torch.no_grad():
-                action = ppo.policy_old.act(state, memory)
-            state, reward, done, truncated, _ = env.step(action.numpy())
-            
-            # Saving reward and is_terminal:
-            memory.rewards.append(reward)
-            memory.is_terminals.append(done)
-            
-            # update if its time
-            if timestep % update_timestep == 0:
-                ppo.optimize(memory)
-                memory.clear_memory()
-                timestep = 0
-            
-            running_reward += reward
-            if render:
-                env.render()
-            if done:
-                break
-                
-        avg_length += t
-        
-        # stop training if avg_reward > solved_reward
-        if running_reward > (log_interval*solved_reward):
-            print("########## Solved! ##########")
-            torch.save(ppo.policy.state_dict(), './PPO_{}.pth'.format(env_name))
-            break
-            
-        # logging
-        if i_episode % log_interval == 0:
-            avg_length = int(avg_length/log_interval)
-            running_reward = int((running_reward/log_interval))
-            
-            print('Episode {} \t avg length: {} \t reward: {}'.format(i_episode, avg_length, running_reward))
-            running_reward = 0
-            avg_length = 0
-            
+    ppo = PPO(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, log_interval, max_episodes, max_timesteps, update_timestep)
+    ppo.train()
+
 if __name__ == '__main__':
-    main()           
+    main()     
+    
+         
