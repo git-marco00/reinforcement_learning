@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.distributions import Categorical
+from torch.distributions import MultivariateNormal
 import gymnasium as gym
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -29,12 +29,12 @@ class ActorCritic(nn.Module):
 
         # actor
         self.action_layer = nn.Sequential(
-                nn.Linear(self.state_dim, n_latent_var),
+                nn.Linear(state_dim, n_latent_var),
                 nn.Tanh(),
                 nn.Linear(n_latent_var, n_latent_var),
                 nn.Tanh(),
-                nn.Linear(n_latent_var, self.action_dim),
-                nn.Softmax(dim=-1)
+                nn.Linear(n_latent_var, action_dim),
+                nn.Tanh()
                 )
         
         # critic
@@ -51,11 +51,11 @@ class ActorCritic(nn.Module):
     
     # for interacting with environment
     def act(self, state, memory):
-
         state = torch.from_numpy(state).float().to(device)
-        distr_values = self.action_layer(state)
+        distr_values = self.action_layer(state).unsqueeze(0)
+        means, stds = distr_values[:, :self.action_dim].squeeze(), distr_values[:, self.action_dim:].squeeze() + 1
 
-        dist = Categorical(distr_values)
+        dist = MultivariateNormal(means, torch.diag(stds))
         action = dist.sample()
         
         memory.states.append(state)
@@ -67,7 +67,13 @@ class ActorCritic(nn.Module):
     # for ppo update
     def evaluate(self, state, action):
         distr_values = self.action_layer(state)
-        dist = Categorical(distr_values)
+        means, stds = distr_values[:, :self.action_dim], distr_values[:, self.action_dim:] + 1
+
+        stds_diags = torch.Tensor(stds.shape[0], 2, 2)
+        for i in range(stds.shape[0]):
+            stds_diags[i] = torch.diag(stds[i])
+
+        dist = MultivariateNormal(means, stds_diags)
         
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
@@ -91,7 +97,7 @@ class PPO():
         
         self.MseLoss = nn.MSELoss()
     
-    def optimize(self, memory):   
+    def update(self, memory):   
         # Monte Carlo estimate of state rewards (can be replaced by General Advantage Estimators)
         rewards = []
         discounted_reward = 0
@@ -141,10 +147,10 @@ def main():
     state_dim = env.observation_space.shape[0]
     action_dim = 4
     render = False
-    solved_reward = 500         # stop training if avg_reward > solved_reward
+    solved_reward = 230         # stop training if avg_reward > solved_reward
     log_interval = 20           # print avg reward in the interval
     max_episodes = 50000        # max training episodes
-    max_timesteps = 1000        # max timesteps in one episode
+    max_timesteps = 300         # max timesteps in one episode
     n_latent_var = 64           # number of variables in hidden layer
     update_timestep = 2000      # update policy every n timesteps
     lr = 0.002
@@ -186,7 +192,7 @@ def main():
             
             # update if its time
             if timestep % update_timestep == 0:
-                ppo.optimize(memory)
+                ppo.update(memory)
                 memory.clear_memory()
                 timestep = 0
             
