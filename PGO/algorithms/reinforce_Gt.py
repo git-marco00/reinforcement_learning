@@ -2,11 +2,12 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import os
 from networks.stochastic_network import Actor as PolicyNetwork
-from networks.stochastic_network import Critic
 from tqdm import trange
 import torch
 from torch.distributions.categorical import Categorical
 import numpy as np
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 class Reinforce():
 	def __init__(self, env, lr, n_trajectories, n_episodes, gamma):
@@ -20,8 +21,6 @@ class Reinforce():
 
 		self.policy_network = PolicyNetwork(n_states=self.n_states, n_actions=self.n_actions)
 		self.policy_opt = torch.optim.Adam(params = self.policy_network.parameters(), lr = self.lr)
-		self.critic_network = Critic(input_dim=self.n_states, output_dim=1)
-		self.critic_opt = torch.optim.Adam(params = self.critic_network.parameters(), lr = self.lr)
 
 		self.scores = []
 		self.loss_history=[]
@@ -29,6 +28,7 @@ class Reinforce():
 		self.state_buffer = []
 		self.action_buffer = []
 		self.reward_buffer = []
+		self.logprob_buffer = []
 		
 		self.loss_fn = torch.nn.MSELoss()
 
@@ -41,6 +41,7 @@ class Reinforce():
 				self.state_buffer.append([])
 				self.action_buffer.append([])
 				self.reward_buffer.append([])
+				self.logprob_buffer.append([])
 
 				state = self.env.reset()[0]
 				state = torch.tensor(state)
@@ -54,6 +55,8 @@ class Reinforce():
 					distr = Categorical(distr_params.squeeze())
 					
 					action = distr.sample()	# returns a tensor
+					
+					log_prob = distr.log_prob(action)
 
 					new_state, reward, terminated, truncated, _ = self.env.step(action.numpy())	# tensor => numpy array
 
@@ -62,6 +65,7 @@ class Reinforce():
 					self.state_buffer[traj].append(state)
 					self.action_buffer[traj].append(action)
 					self.reward_buffer[traj].append(reward)
+					self.logprob_buffer[traj].append(log_prob)
 
 					state = torch.tensor(new_state)
 				
@@ -78,6 +82,7 @@ class Reinforce():
 			self.state_buffer.clear()
 			self.action_buffer.clear()
 			self.reward_buffer.clear()
+			self.logprob_buffer.clear()
 
 				
 	def compute_returns(self):
@@ -92,46 +97,31 @@ class Reinforce():
 	def optimize(self):
 		# self.state_buffer = [15, 104, 8]
 		for i in range(self.n_trajectories):
-			self.state_buffer[i] = torch.stack(self.state_buffer[i])	#  => Torch.size([104, 8])
-			self.action_buffer[i] = torch.stack(self.action_buffer[i])
 			self.reward_buffer[i] = torch.stack(self.reward_buffer[i])
+			self.logprob_buffer[i] = torch.stack(self.logprob_buffer[i])
 
-		state_batch = torch.cat(self.state_buffer, 0)		# => Torch.size([1858, 8])
-		action_batch = torch.cat(self.action_buffer, 0)
 		reward_batch = torch.cat(self.reward_buffer, 0).squeeze()
-		
-        ## critic
-		values = self.critic_network(state_batch)
-		loss = self.loss_fn(values.squeeze(), reward_batch)
-		self.critic_opt.zero_grad()
-		loss.backward()
-		self.critic_opt.step()
-		
-		with torch.no_grad():
-			values = self.critic_network(state_batch).squeeze()
+		logprobs_batch = torch.cat(self.logprob_buffer, 0)
 
-		distr_params = self.policy_network(state_batch)
-		m = Categorical(distr_params)
+		norm_reward = (reward_batch - reward_batch.mean()) / (reward_batch.std() + 1e-6)
 		
-		log_probs = m.log_prob(action_batch)	
-
-		loss = -log_probs * values	# torch.Size([1589])
+		loss = -logprobs_batch * norm_reward	# torch.Size([1589])
 
 		self.policy_opt.zero_grad()
-		self.loss_history.append(loss.mean())
+		self.loss_history.append(loss.mean().item())
 		loss.mean().backward()
 		self.policy_opt.step()
 				
 
 	def plot_rewards(self):
 		PATH = os.path.abspath(__file__)
-		x = range(0, self.n_episodes)
-		plt.plot(x, self.scores)
-		plt.savefig(f"PGO/res/my_SPGD_score.png")
+		plt.plot(self.scores)
+		plt.savefig(f"PGO/res/REINFORCE/reinforce_Gt_score.png")
 		plt.clf()
 
 		plt.plot(self.loss_history)
-		plt.savefig(f"PGO/res/my_SPGD_loss.png")
+		plt.savefig(f"PGO/res/REINFORCE/reinforce_Gt_actor_loss.png")
+		plt.clf()
 
 	def test(self, env, n_episodes=5):
 		for i in range (n_episodes):
@@ -154,7 +144,7 @@ num_cores = 8
 torch.set_num_interop_threads(num_cores) # Inter-op parallelism
 torch.set_num_threads(num_cores) # Intra-op parallelism
 env = gym.make('CartPole-v1', render_mode=None)
-trainer = Reinforce(env=env, lr=0.001, n_trajectories=1, n_episodes=2000, gamma=0.99)
+trainer = Reinforce(env=env, lr=0.001, n_trajectories=10, n_episodes=200, gamma=0.99)
 trainer.train()
 trainer.plot_rewards()
 env.close()

@@ -7,6 +7,8 @@ from tqdm import trange
 import torch
 from torch.distributions.categorical import Categorical
 import numpy as np
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 class Reinforce():
 	def __init__(self, env, lr, n_trajectories, n_episodes, gamma):
@@ -24,7 +26,8 @@ class Reinforce():
 		self.critic_opt = torch.optim.Adam(params = self.critic_network.parameters(), lr = self.lr)
 
 		self.scores = []
-		self.loss_history=[]
+		self.critic_loss_history = []
+		self.policy_loss_history = []
 
 		self.state_buffer = []
 		self.action_buffer = []
@@ -103,6 +106,7 @@ class Reinforce():
         ## critic
 		values = self.critic_network(state_batch)
 		loss = self.loss_fn(values.squeeze(), reward_batch)
+		self.critic_loss_history.append(loss.item())
 		self.critic_opt.zero_grad()
 		loss.backward()
 		self.critic_opt.step()
@@ -119,20 +123,24 @@ class Reinforce():
 		loss = -log_probs * advantages	# torch.Size([1589])
 
 		self.policy_opt.zero_grad()
-		self.loss_history.append(loss.mean())
+		self.policy_loss_history.append(loss.mean().item())
 		loss.mean().backward()
 		self.policy_opt.step()
 				
 
 	def plot_rewards(self):
 		PATH = os.path.abspath(__file__)
-		x = range(0, self.n_episodes)
-		plt.plot(x, self.scores)
-		plt.savefig(f"PGO/res/my_SPGD_score.png")
+		plt.plot(self.scores)
+		plt.savefig(f"PGO/res/REINFORCE/reinforce_ADVANTAGE_score.png")
 		plt.clf()
 
-		plt.plot(self.loss_history)
-		plt.savefig(f"PGO/res/my_SPGD_loss.png")
+		plt.plot(self.critic_loss_history)
+		plt.savefig(f"PGO/res/REINFORCE/reinforce_ADVANTAGE_critic_loss.png")
+		plt.clf()
+
+		plt.plot(self.policy_loss_history)
+		plt.savefig(f"PGO/res/REINFORCE/reinforce_ADVANTAGE_policy_loss.png")
+		plt.clf()
 
 	def test(self, env, n_episodes=5):
 		for i in range (n_episodes):
@@ -155,7 +163,7 @@ num_cores = 8
 torch.set_num_interop_threads(num_cores) # Inter-op parallelism
 torch.set_num_threads(num_cores) # Intra-op parallelism
 env = gym.make('CartPole-v1', render_mode=None)
-trainer = Reinforce(env=env, lr=0.001, n_trajectories=1, n_episodes=2000, gamma=0.99)
+trainer = Reinforce(env=env, lr=0.001, n_trajectories=10, n_episodes=200, gamma=0.99)
 trainer.train()
 trainer.plot_rewards()
 env.close()

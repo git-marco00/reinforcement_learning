@@ -23,8 +23,6 @@ args = parser.parse_args()
 
 
 env = gym.make('CartPole-v1')
-env.reset(seed=args.seed)
-torch.manual_seed(args.seed)
 
 
 class Policy(nn.Module):
