@@ -175,7 +175,7 @@ env = gym.make('CartPole-v1', render_mode=None)
 
 solved_reward = 500
 early_stopping_window = 20
-trainer = Reinforce(env=env, lr=0.001, n_trajectories=10, n_episodes=300, gamma=0.99, solved_reward=solved_reward, early_stopping_window=early_stopping_window)
+trainer = Reinforce(env=env, lr=0.001, n_trajectories=10, n_episodes=500, gamma=0.99, solved_reward=solved_reward, early_stopping_window=early_stopping_window)
 trainer.train()
 trainer.plot_rewards()
 env.close()

@@ -46,6 +46,8 @@ class PPO():
         self.critic_loss_history = []
         self.scores_history = []
         self.window = deque(maxlen=self.early_stopping_window)
+
+        self.clipped_gradient_counter = [0]
         
     
     def optimize(self):   
@@ -86,6 +88,12 @@ class PPO():
             surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages.detach()
             # MseLoss is for the update of critic, dist_entropy denotes an entropy bonus
             new_policy_loss = -torch.min(surr1, surr2)
+
+            #TODO: REMOVE
+            for i in range(len(surr2)):
+                if surr1[i] != surr2[i]:
+                    self.clipped_gradient_counter.append(self.clipped_gradient_counter[-1]+1)
+                else: self.clipped_gradient_counter.append(self.clipped_gradient_counter[-1])
 
             critic_loss = 0.5*self.MseLoss(state_values, rewards)
             
@@ -166,34 +174,54 @@ class PPO():
     def plot(self, plot_scores=True, plot_critic_loss=True, plot_actor_loss=True):
         PATH = os.path.abspath(__file__)
 
+        
         if plot_scores is True:
             window_size = 10
             smoothed_data = np.convolve(self.scores_history, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
+            ax = plt.gca()
+            ax.set_xlim([0, 3000])
             plt.title("Score")
             plt.xlabel("Episode")
             plt.ylabel("Reward")
-            plt.savefig("PGO/res/PPO/score.png")
+            plt.savefig("PGO/res/PPO/score_0.01.png")
             plt.clf()
 
         if plot_critic_loss is True:
             window_size = 5
             smoothed_data = np.convolve(self.critic_loss_history, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
+            ax = plt.gca()
+            ax.set_xlim([0, 700])
             plt.title("Value function loss")
             plt.xlabel("Episode")
             plt.ylabel("Loss")
-            plt.savefig("PGO/res/PPO/critic_loss.png")
+            plt.savefig("PGO/res/PPO/critic_loss_0.01.png")
             plt.clf()
 
         if plot_actor_loss is True:
             window_size = 5
             smoothed_data = np.convolve(self.policy_loss_history, np.ones(window_size)/window_size, mode='valid')
             plt.plot(smoothed_data)
+            ax = plt.gca()
+            ax.set_xlim([0, 700])
             plt.title("Policy function loss")
             plt.xlabel("Episode")
             plt.ylabel("Loss")
-            plt.savefig("PGO/res/PPO/policy_loss.png")
+            plt.savefig("PGO/res/PPO/policy_loss_0.01.png")
+            plt.clf()
+        
+        if plot_actor_loss is True:
+            window_size = 1
+            smoothed_data = np.convolve(self.clipped_gradient_counter, np.ones(window_size)/window_size, mode='valid')
+            plt.plot(self.clipped_gradient_counter)
+            ax = plt.gca()
+            ax.set_xlim([0, 1.2e6])
+            ax.set_ylim([0, 800000])
+            plt.title("Clipped Gradient Counter")
+            plt.xlabel("Steps")
+            plt.ylabel("Clips")
+            plt.savefig("PGO/res/PPO/clipped_gradient_0.01.png")
             plt.clf()
 
         
@@ -213,7 +241,7 @@ def main():
     betas = (0.9, 0.999)
     gamma = 0.99                # discount factor
     K_epochs = 4                # update policy for K epochs
-    eps_clip = 0.2              # clip parameter for PPO
+    eps_clip = 0.01             # clip parameter for PPO
     early_stopping_window = 20
     #############################################
     
