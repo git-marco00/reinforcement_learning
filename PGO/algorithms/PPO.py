@@ -181,6 +181,7 @@ class PPO():
             plt.plot(smoothed_data)
             ax = plt.gca()
             ax.set_xlim([0, 3000])
+            ax.set_ylim([0, 500])
             plt.title("Score")
             plt.xlabel("Episode")
             plt.ylabel("Reward")
