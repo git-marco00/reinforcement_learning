@@ -44,6 +44,9 @@ class PGO_trainer():
         # ACTOR
         self.actor_network = Actor(self.n_states, self.n_actions)
         self.actor_optim = torch.optim.Adam(params = self.actor_network.parameters(), lr = actor_lr)
+        self.old_actor = Actor(self.n_states, self.n_actions)
+        self.old_actor.load_state_dict(self.actor_network.state_dict())
+        self.policy_ratios = [] 
 
         # CRITIC
         self.critic_network = Critic(input_dim=self.n_states+1, output_dim=1)
@@ -92,6 +95,7 @@ class PGO_trainer():
             if len(self.replay_buffer) > self.batch_size*2:
                 self.optimize()
                 self.update_target_model(self.target_model_update_rate)
+                self.old_actor.load_state_dict(self.actor_network.state_dict())
             t.set_description(f"Episode score: {round(self.scores[-1], 2)}, critic_loss: {round(sum(self.critic_loss_history)/(len(self.critic_loss_history)+1),2)}, actor_loss: {round(sum(self.actor_loss_history)/(len(self.actor_loss_history)+1),2)}")
 
             # early stopping condition
@@ -152,12 +156,18 @@ class PGO_trainer():
         self.critic_loss_history.append(critic_loss.item())
 
         ############# ACTOR OPTIMIZATION #############
+        old_distr_params = self.actor_network(states_batch)
+        old_m = Categorical(old_distr_params)
+        old_log_probs = old_m.log_prob(actions_batch)
         if self.ep > 50:
             distr_params = self.actor_network(states_batch)
             
             m = Categorical(distr_params)
 
             log_probs = m.log_prob(actions_batch)
+
+            with torch.no_grad():
+                self.policy_ratios.append(torch.exp(log_probs-old_log_probs).mean().item())
 
             # current batch
             with torch.no_grad():
@@ -174,6 +184,8 @@ class PGO_trainer():
             self.actor_optim.step()
 
 
+
+
     def plot(self, plot_scores=True, plot_critic_loss=True, plot_actor_loss=True):
         PATH = os.path.abspath(__file__)
 
@@ -184,7 +196,7 @@ class PGO_trainer():
             plt.title("Score")
             plt.xlabel("Episode")
             plt.ylabel("Reward")
-            plt.savefig("PGO/res/AC/score_3.png")
+            plt.savefig("PGO/res/AC/score_4.png")
             plt.clf()
 
         if plot_critic_loss is True:
@@ -194,7 +206,7 @@ class PGO_trainer():
             plt.title("Critic function loss")
             plt.xlabel("Episode")
             plt.ylabel("Loss")
-            plt.savefig("PGO/res/AC/critic_loss_3.png")
+            plt.savefig("PGO/res/AC/critic_loss_4.png")
             plt.clf()
 
         if plot_actor_loss is True:
@@ -204,7 +216,14 @@ class PGO_trainer():
             plt.title("Actor function loss")
             plt.xlabel("Episode")
             plt.ylabel("Loss")
-            plt.savefig("PGO/res/AC/actor_loss_3.png")
+            plt.savefig("PGO/res/AC/actor_loss_4.png")
+            plt.clf()
+
+            plt.plot(self.policy_ratios)
+            plt.title("New policy / Old policy")
+            plt.xlabel("Step")
+            plt.ylabel("ratio")
+            plt.savefig("PGO/res/AC/ratios_4.png")
             plt.clf()
 
         
