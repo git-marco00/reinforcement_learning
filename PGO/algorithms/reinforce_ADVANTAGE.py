@@ -14,7 +14,7 @@ import time
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 class Reinforce():
-	def __init__(self, env, lr, n_trajectories, n_episodes, gamma, solved_reward, early_stopping_window):
+	def __init__(self, env, lr, n_trajectories, n_episodes, gamma, solved_reward, early_stopping_window, model_path):
 		self.env = env
 		self.n_actions = 2
 		self.n_states = 4
@@ -22,6 +22,7 @@ class Reinforce():
 		self.n_trajectories = n_trajectories
 		self.n_episodes = n_episodes
 		self.gamma = gamma
+		self.model_path = model_path
 
 		self.policy_network = PolicyNetwork(n_states=self.n_states, n_actions=self.n_actions)
 		self.policy_opt = torch.optim.Adam(params = self.policy_network.parameters(), lr = self.lr)
@@ -76,19 +77,19 @@ class Reinforce():
 
 					state = torch.tensor(new_state)
 				
-			
+				# early stopping condition
+				self.window.append(episode_scores[-1])
+				if int(mean(self.window)) == self.solved_reward:
+					end_timestamp = time.time()
+					total_time = end_timestamp - start_timestamp
+					print(f"[ENVIRONMENT SOLVED in {total_time} seconds]")
+					# save model
+					self.save_model(self.model_path)
+					t.close()
+					return
+				
 			self.scores.append(np.mean(episode_scores))
 			t.set_description(f"score: {round(np.mean(episode_scores), 2)}")
-
-			# early stopping condition
-			self.window.append(self.scores[-1])
-			if int(mean(self.window)) == self.solved_reward:
-				end_timestamp = time.time()
-				total_time = end_timestamp - start_timestamp
-				print(f"[ENVIRONMENT SOLVED in {total_time} seconds]")
-                # save model
-				t.close()
-				return
             
 			episode_scores.clear()
 
@@ -103,6 +104,7 @@ class Reinforce():
 		end_timestamp = time.time()
 		total_time = end_timestamp - start_timestamp
 		print(f"[ENVIRONMENT NOT SOLVED. Elapsed time: {total_time} seconds]")
+		self.save_model(self.model_path)
 			
 				
 	def compute_returns(self):
@@ -148,6 +150,13 @@ class Reinforce():
 		self.policy_loss_history.append(loss.mean().item())
 		loss.mean().backward()
 		self.policy_opt.step()
+
+	def save_model(self, path):
+		torch.save(self.policy_network.state_dict(), path)
+
+	def load_model(self, path):
+		self.policy_network = PolicyNetwork(self.n_states, self.n_actions)
+		self.policy_network.load_state_dict(torch.load(path))
 				
 
 	def plot_rewards(self):
@@ -173,7 +182,8 @@ class Reinforce():
 		plt.ylabel("Loss")
 		plt.clf()
 
-	def test(self, env, n_episodes=5):
+	def test(self, env, n_episodes, model_path):
+		self.load_model(model_path)
 		for i in range (n_episodes):
 			truncated = False
 			terminated = False
@@ -182,7 +192,7 @@ class Reinforce():
 			while not (truncated or terminated):
 				distr_params= self.policy_network(state.unsqueeze(0))
 
-				distr = Categorical(distr_params)
+				distr = Categorical(distr_params.squeeze())
 					
 				action = distr.sample()	# returns a tensor
 
@@ -193,11 +203,21 @@ class Reinforce():
 num_cores = 8
 torch.set_num_interop_threads(num_cores) # Inter-op parallelism
 torch.set_num_threads(num_cores) # Intra-op parallelism
-env = gym.make('CartPole-v1', render_mode=None)
 
+env = gym.make('CartPole-v1', render_mode=None)
 solved_reward = 500
 early_stopping_window = 20
-trainer = Reinforce(env=env, lr=0.001, n_trajectories=10, n_episodes=500, gamma=0.99, solved_reward=solved_reward, early_stopping_window=early_stopping_window)
+lr=0.001
+n_trajectories=10
+n_episodes=500
+gamma=0.99
+model_path = "PGO/algorithms/saved_models/REINFORCE_advantage_policy"
+
+
+trainer = Reinforce(env=env, lr=lr, n_trajectories=n_trajectories, n_episodes=n_episodes, gamma=gamma, solved_reward=solved_reward, early_stopping_window=early_stopping_window, model_path=model_path)
 trainer.train()
 trainer.plot_rewards()
+env.close()
+env = gym.make('CartPole-v1', render_mode = "human")
+trainer.test(env = env, n_episodes=5, model_path=model_path)
 env.close()

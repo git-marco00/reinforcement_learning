@@ -16,7 +16,7 @@ os.environ['KMP_DUPLICATE_LIB_OK']='True'
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class PPO():
-    def __init__(self, env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window):
+    def __init__(self, env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window, model_path):
         self.env = env
         self.lr = lr
         self.betas = betas
@@ -29,15 +29,19 @@ class PPO():
         self.update_timestep = update_timestep
         self.early_stopping_window = early_stopping_window
         self.memory = Memory()
+        self.n_states = state_dim
+        self.n_actions = action_dim
+        self.n_latent_var = n_latent_var
+        self.model_path = model_path
 
         # actor
-        self.policy = Actor(n_states=state_dim, n_actions=action_dim, hidden=n_latent_var).to(device)
+        self.policy = Actor(n_states=self.n_states, n_actions=self.n_actions, hidden=self.n_latent_var).to(device)
         self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr, betas=betas)
-        self.policy_old = Actor(n_states=state_dim, n_actions=action_dim, hidden=n_latent_var).to(device)
+        self.policy_old = Actor(n_states=self.n_states, n_actions=self.n_actions, hidden=self.n_latent_var).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
         
         # critic V function
-        self.critic = Critic(input_dim=state_dim, output_dim=1, n_hidden=n_latent_var)
+        self.critic = Critic(input_dim=self.n_states, output_dim=1, n_hidden=self.n_latent_var)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr, betas=betas)
         self.MseLoss = nn.MSELoss()
 
@@ -168,13 +172,14 @@ class PPO():
                 total_time = end_timestamp - start_timestamp
                 print(f"[ENVIRONMENT SOLVED in {total_time} seconds]")
                 # save model
+                self.save_model(self.model_path)
                 t.close()
                 break
 
-    def plot(self, plot_scores=True, plot_critic_loss=True, plot_actor_loss=True):
-        PATH = os.path.abspath(__file__)
+        print(f"[ENVIRONMENT NOT SOLVED]")
+        self.save_model(self.model_path)
 
-        
+    def plot(self, plot_scores=True, plot_critic_loss=True, plot_actor_loss=True):
         if plot_scores is True:
             window_size = 10
             smoothed_data = np.convolve(self.scores_history, np.ones(window_size)/window_size, mode='valid')
@@ -225,11 +230,37 @@ class PPO():
             plt.savefig("PGO/res/PPO/clipped_gradient_0.01.png")
             plt.clf()
 
+    def test(self, n_episodes, model_path, env):
+        self.load_model(model_path)
+        for ep in range(n_episodes):
+            truncated = False
+            terminated = False
+
+            state = env.reset()[0]
+            state = torch.tensor(state)
+
+            while not (truncated or terminated):
+                distr_params = self.policy(state.unsqueeze(0))
+
+                distr = Categorical(distr_params)
+			
+                action = distr.sample().squeeze()
+
+                new_state, reward, terminated, truncated, _ = env.step(action.numpy())
+
+                state = torch.tensor(new_state)
+
+    def save_model(self, path):
+        torch.save(self.policy.state_dict(), path)
+
+    def load_model(self, path):
+        self.policy = Actor(n_states=self.n_states, n_actions=self.n_actions, hidden=self.n_latent_var)
+        self.policy.load_state_dict(torch.load(path))
+
         
 def main():
     ############## Hyperparameters ##############
     env_name = "CartPole-v1"
-    # creating environment
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = 2
@@ -242,14 +273,19 @@ def main():
     betas = (0.9, 0.999)
     gamma = 0.99                # discount factor
     K_epochs = 4                # update policy for K epochs
-    eps_clip = 0.01             # clip parameter for PPO
+    eps_clip = 0.5              # clip parameter for PPO
     early_stopping_window = 20
+    model_path = model_path = "PGO/algorithms/saved_models/PPO_actor"
     #############################################
     
-    ppo = PPO(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window)
-    ppo.train()
-    ppo.plot()
-
+    ppo = PPO(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window, model_path = model_path)
+    #ppo.train()
+    #ppo.plot()
+    env.close()
+    env = gym.make('CartPole-v1', render_mode = "human")
+    ppo.test(n_episodes=5, model_path=model_path, env=env)
+    env.close()
+    
 if __name__ == '__main__':
     main()     
     
