@@ -273,13 +273,13 @@ def main():
     betas = (0.9, 0.999)
     gamma = 0.99                # discount factor
     K_epochs = 4                # update policy for K epochs
-    eps_clip = 0.5              # clip parameter for PPO
+    eps_clip = 0.2              # clip parameter for PPO
     early_stopping_window = 20
     model_path = model_path = "PGO/algorithms/saved_models/PPO_actor"
     #############################################
     
     ppo = PPO(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window, model_path = model_path)
-    #ppo.train()
+    ppo.train()
     #ppo.plot()
     env.close()
     env = gym.make('CartPole-v1', render_mode = "human")
