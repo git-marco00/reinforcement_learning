@@ -1,3 +1,6 @@
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
@@ -5,17 +8,17 @@ import gymnasium as gym
 from networks.stochastic_network import Actor, Critic
 from my_utils.Memory import Memory
 from tqdm import trange
-import os
 import numpy as np
 from matplotlib import pyplot as plt
 from collections import deque
 from statistics import mean
 import time
+from agent_interface import Agent
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class PPO():
+class PPO_agent(Agent):
     def __init__(self, env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window, model_path):
         self.env = env
         self.lr = lr
@@ -32,7 +35,7 @@ class PPO():
         self.n_states = state_dim
         self.n_actions = action_dim
         self.n_latent_var = n_latent_var
-        self.model_path = model_path
+        self.model_path = os.path.normpath(os.path.join(os.path.dirname(__file__), model_path))
 
         # actor
         self.policy = Actor(n_states=self.n_states, n_actions=self.n_actions, hidden=self.n_latent_var).to(device)
@@ -202,7 +205,7 @@ class PPO():
             plt.title("Value function loss")
             plt.xlabel("Episode")
             plt.ylabel("Loss")
-            plt.savefig("PGO/res/PPO/critic_loss_0.01.png")
+            plt.savefig("critic_loss_0.01.png")
             plt.clf()
 
         if plot_actor_loss is True:
@@ -214,7 +217,7 @@ class PPO():
             plt.title("Policy function loss")
             plt.xlabel("Episode")
             plt.ylabel("Loss")
-            plt.savefig("PGO/res/PPO/policy_loss_0.01.png")
+            plt.savefig("policy_loss_0.01.png")
             plt.clf()
         
         if plot_actor_loss is True:
@@ -227,11 +230,11 @@ class PPO():
             plt.title("Clipped Gradient Counter")
             plt.xlabel("Steps")
             plt.ylabel("Clips")
-            plt.savefig("PGO/res/PPO/clipped_gradient_0.01.png")
+            plt.savefig("clipped_gradient_0.01.png")
             plt.clf()
 
-    def test(self, n_episodes, model_path, env):
-        self.load_model(model_path)
+    def test(self, n_episodes, env):
+        self.load_model(self.model_path)
         for ep in range(n_episodes):
             truncated = False
             terminated = False
@@ -258,35 +261,32 @@ class PPO():
         self.policy.load_state_dict(torch.load(path))
 
         
-def main():
-    ############## Hyperparameters ##############
-    env_name = "CartPole-v1"
-    env = gym.make(env_name)
-    state_dim = env.observation_space.shape[0]
-    action_dim = 2
-    solved_reward = 500         # stop training if avg_reward > solved_reward
-    max_episodes = 3000         # max training episodes
-    max_timesteps = 1000        # max timesteps in one episode
-    n_latent_var = 64           # number of variables in hidden layer
-    update_timestep = 2000      # update policy every n timesteps
-    lr = 0.002
-    betas = (0.9, 0.999)
-    gamma = 0.99                # discount factor
-    K_epochs = 4                # update policy for K epochs
-    eps_clip = 0.2              # clip parameter for PPO
-    early_stopping_window = 20
-    model_path = model_path = "PGO/algorithms/saved_models/PPO_actor"
-    #############################################
-    
-    ppo = PPO(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window, model_path = model_path)
-    ppo.train()
-    #ppo.plot()
-    env.close()
-    env = gym.make('CartPole-v1', render_mode = "human")
-    ppo.test(n_episodes=5, model_path=model_path, env=env)
-    env.close()
-    
-if __name__ == '__main__':
-    main()     
-    
+
+############## Hyperparameters ##############
+env_name = "CartPole-v1"
+env = gym.make(env_name)
+state_dim = env.observation_space.shape[0]
+action_dim = 2
+solved_reward = 500         # stop training if avg_reward > solved_reward
+max_episodes = 3000         # max training episodes
+max_timesteps = 1000        # max timesteps in one episode
+n_latent_var = 64           # number of variables in hidden layer
+update_timestep = 2000      # update policy every n timesteps
+lr = 0.002
+betas = (0.9, 0.999)
+gamma = 0.99                # discount factor
+K_epochs = 4                # update policy for K epochs
+eps_clip = 0.2              # clip parameter for PPO
+early_stopping_window = 20
+model_path = model_path = "saved_models\\PPO_actor"
+#############################################
+
+ppo = PPO_agent(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window, model_path = model_path)
+ppo.train()
+#ppo.plot()
+env.close()
+env = gym.make('CartPole-v1', render_mode = "human")
+ppo.test(n_episodes=5, env=env)
+env.close()
+
          
