@@ -200,25 +200,29 @@ class Reinforce_ADVANTAGE_agent(Agent):
 				new_state, reward, terminated, truncated, _ = env.step(action.numpy())	# tensor => numpy array
 
 				state = torch.tensor(new_state)
-						
-num_cores = 8
-torch.set_num_interop_threads(num_cores) # Inter-op parallelism
-torch.set_num_threads(num_cores) # Intra-op parallelism
 
-env = gym.make('CartPole-v1', render_mode=None)
-solved_reward = 500
-early_stopping_window = 20
-lr=0.001
-n_trajectories=10
-n_episodes=500
-gamma=0.99
-model_path = "saved_models\\REINFORCE_advantage_policy"
+def main():			
+	num_cores = 8
+	torch.set_num_interop_threads(num_cores) # Inter-op parallelism
+	torch.set_num_threads(num_cores) # Intra-op parallelism
+
+	env = gym.make('CartPole-v1', render_mode=None)
+	solved_reward = 500
+	early_stopping_window = 20
+	lr=0.001
+	n_trajectories=10
+	n_episodes=500
+	gamma=0.99
+	model_path = "saved_models\\REINFORCE_advantage_policy"
 
 
-trainer = Reinforce_ADVANTAGE_agent(env=env, lr=lr, n_trajectories=n_trajectories, n_episodes=n_episodes, gamma=gamma, solved_reward=solved_reward, early_stopping_window=early_stopping_window, model_path=model_path)
-trainer.train()
-trainer.plot_rewards()
-env.close()
-env = gym.make('CartPole-v1', render_mode = "human")
-trainer.test(env = env, n_episodes=5)
-env.close()
+	trainer = Reinforce_ADVANTAGE_agent(env=env, lr=lr, n_trajectories=n_trajectories, n_episodes=n_episodes, gamma=gamma, solved_reward=solved_reward, early_stopping_window=early_stopping_window, model_path=model_path)
+	trainer.train()
+	trainer.plot_rewards()
+	env.close()
+	env = gym.make('CartPole-v1', render_mode = "human")
+	trainer.test(env = env, n_episodes=5)
+	env.close()
+
+if __name__ == '__main__':
+    main()  

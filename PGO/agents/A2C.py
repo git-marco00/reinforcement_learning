@@ -245,29 +245,32 @@ class A2C_agent(Agent):
 
                 state = torch.tensor(new_state)
    
+def main():
+    # PARAMETERS
+    env = gym.make('CartPole-v1')
+    gamma = 0.99
+    episodes = 1000
+    actor_lr = 0.001
+    critic_lr= 0.001
+    buffer_max_len = 500000
+    steps2opt = 5
+    steps2converge = 5
+    mode = "target_networks"
+    batch_size = 32
+    tau = 0.1
+    critic_bootstrap = 30
+    solved_reward = 500
+    early_stopping_window = 20
+    model_path = "saved_models\\A2C_actor"
 
-# PARAMETERS
-env = gym.make('CartPole-v1')
-gamma = 0.99
-episodes = 1000
-actor_lr = 0.001
-critic_lr= 0.001
-buffer_max_len = 500000
-steps2opt = 5
-steps2converge = 5
-mode = "target_networks"
-batch_size = 32
-tau = 0.1
-critic_bootstrap = 30
-solved_reward = 500
-early_stopping_window = 20
-model_path = "saved_models\\A2C_actor"
 
+    trainer = A2C_agent(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, steps2opt=steps2opt, steps2converge=steps2converge, mode=mode, batch_size=batch_size, tau = tau, critic_bootstrap=critic_bootstrap, solved_reward= solved_reward, early_stopping_window = early_stopping_window, model_path = model_path)
+    #trainer.train()
+    #trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
+    env.close()
+    env = gym.make('CartPole-v1', render_mode = "human")
+    trainer.test(n_episodes=5, env=env)
+    env.close()
 
-trainer = A2C_agent(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, steps2opt=steps2opt, steps2converge=steps2converge, mode=mode, batch_size=batch_size, tau = tau, critic_bootstrap=critic_bootstrap, solved_reward= solved_reward, early_stopping_window = early_stopping_window, model_path = model_path)
-#trainer.train()
-#trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
-env.close()
-env = gym.make('CartPole-v1', render_mode = "human")
-trainer.test(n_episodes=5, env=env)
-env.close()
+if __name__ == '__main__':
+    main()  

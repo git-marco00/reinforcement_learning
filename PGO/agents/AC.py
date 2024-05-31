@@ -259,24 +259,27 @@ class AC_agent(Agent):
             target_weights[i] = weights[i] * tau + target_weights[i] * (1-tau)
         self.target_critic_network.load_state_dict(target_weights)
    
+def main():
+    # PARAMETERS
+    env = gym.make('CartPole-v1')
+    gamma = 0.99
+    episodes = 700
+    actor_lr = 0.001
+    critic_lr= 0.001
+    buffer_max_len = 100000
+    batch_size = 256
+    target_model_update_rate = 0.01
+    solved_reward = 500
+    early_stopping_window = 20
 
-# PARAMETERS
-env = gym.make('CartPole-v1')
-gamma = 0.99
-episodes = 700
-actor_lr = 0.001
-critic_lr= 0.001
-buffer_max_len = 100000
-batch_size = 256
-target_model_update_rate = 0.01
-solved_reward = 500
-early_stopping_window = 20
+    model_path = "saved_models\\AC_actor"
+    trainer = AC_agent(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, batch_size=batch_size, target_model_update_rate = target_model_update_rate, solved_reward=solved_reward, early_stopping_window = early_stopping_window, model_path=model_path)
+    trainer.train()
+    trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
+    env.close()
+    env = gym.make('CartPole-v1', render_mode = "human")
+    trainer.test(n_episodes=5, env=env)
+    env.close()
 
-model_path = "saved_models\\AC_actor"
-trainer = AC_agent(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, batch_size=batch_size, target_model_update_rate = target_model_update_rate, solved_reward=solved_reward, early_stopping_window = early_stopping_window, model_path=model_path)
-trainer.train()
-trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
-env.close()
-env = gym.make('CartPole-v1', render_mode = "human")
-trainer.test(n_episodes=5, env=env)
-env.close()
+if __name__ == '__main__':
+    main()  

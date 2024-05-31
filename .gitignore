@@ -1,8 +1,8 @@
 .idea
 .vscode
 DQN/__pycache__
-
 PGO/__pycache__
+PGO/agents/__pycache__/
 PGO/networks/__pycache__
 PGO/my_utils/__pycache__
 PGO/algorithms/networks/__pycache__
