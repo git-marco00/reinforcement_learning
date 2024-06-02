@@ -245,10 +245,12 @@ class AC_agent(Agent):
             plt.clf()
 
         if plot_ratios is True:
+            from math import log10
+            self.policy_ratios = [log10(y) for y in self.policy_ratios]
             plt.plot(self.policy_ratios)
             plt.title("New policy / Old policy")
             plt.xlabel("Step")
-            plt.ylabel("ratio")
+            plt.ylabel("ratio log10")
             plt.savefig("ratios.png")
             plt.clf()
         
@@ -275,7 +277,7 @@ def main():
     model_path = "saved_models\\AC_actor"
     trainer = AC_agent(env = env, gamma=gamma, episodes=episodes, actor_lr=actor_lr, critic_lr=critic_lr, buffer_max_len=buffer_max_len, batch_size=batch_size, target_model_update_rate = target_model_update_rate, solved_reward=solved_reward, early_stopping_window = early_stopping_window, model_path=model_path)
     trainer.train()
-    trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True)
+    trainer.plot(plot_scores=True, plot_actor_loss=True, plot_critic_loss=True, plot_ratios=True)
     env.close()
     env = gym.make('CartPole-v1', render_mode = "human")
     trainer.test(n_episodes=5, env=env)

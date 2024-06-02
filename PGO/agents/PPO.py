@@ -235,6 +235,7 @@ class PPO_agent(Agent):
 
     def test(self, n_episodes, env):
         self.load_model(self.model_path)
+        probs_list = []
         for ep in range(n_episodes):
             truncated = False
             terminated = False
@@ -245,6 +246,9 @@ class PPO_agent(Agent):
             while not (truncated or terminated):
                 distr_params = self.policy(state.unsqueeze(0))
 
+                if state[2]>0.1 or state[2]<-0.1:
+                    probs_list.append((state, distr_params))
+
                 distr = Categorical(distr_params)
 			
                 action = distr.sample().squeeze()
@@ -252,6 +256,7 @@ class PPO_agent(Agent):
                 new_state, reward, terminated, truncated, _ = env.step(action.numpy())
 
                 state = torch.tensor(new_state)
+
 
     def save_model(self, path):
         torch.save(self.policy.state_dict(), path)
@@ -283,8 +288,8 @@ def main():
     #############################################
 
     ppo = PPO_agent(env, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip, solved_reward, max_episodes, max_timesteps, update_timestep, early_stopping_window, model_path = model_path)
-    ppo.train()
-    ppo.plot()
+    #ppo.train()
+    #ppo.plot()
     env.close()
     env = gym.make('CartPole-v1', render_mode = "human")
     ppo.test(n_episodes=5, env=env)
