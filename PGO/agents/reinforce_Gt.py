@@ -147,7 +147,7 @@ class Reinforce_agent(Agent):
 		self.policy_opt.step()
 				
 
-	def plot_rewards(self):
+	def plot(self):
 		PATH = os.path.abspath(__file__)
 		plt.plot(self.scores)
 		plt.title("Score")
@@ -163,8 +163,8 @@ class Reinforce_agent(Agent):
 		plt.savefig("reinforce_Gt_actor_loss.png")
 		plt.clf()
 
-	def test(self, env, model_path, n_episodes=5):
-		self.load_model(model_path)
+	def test(self, env, n_episodes=5):
+		self.load_model(self.model_path)
 		for i in range (n_episodes):
 			truncated = False
 			terminated = False
@@ -194,10 +194,10 @@ def main():
 	n_episodes=500
 	gamma=0.99
 
-	model_path = "saved_models\\REINFORCE_Gt_policy"
+	model_path = "saved_models\\REINFORCE_Gt_policy_2"
 	trainer = Reinforce_agent(env=env, lr=lr, n_trajectories=n_trajectories, n_episodes=n_episodes, gamma=gamma, solved_reward=solved_reward, early_stopping_window=early_stopping_window, model_path = model_path)
 	trainer.train()
-	trainer.plot_rewards()
+	trainer.plot()
 	env.close()
 	env = gym.make('CartPole-v1', render_mode = "human")
 	trainer.test(n_episodes=5, env=env)

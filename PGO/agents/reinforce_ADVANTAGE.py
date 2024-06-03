@@ -161,7 +161,7 @@ class Reinforce_ADVANTAGE_agent(Agent):
 		self.policy_network.load_state_dict(torch.load(path))
 				
 
-	def plot_rewards(self):
+	def plot(self):
 		plt.plot(self.scores)
 		plt.savefig("reinforce_ADVANTAGE_score.png")
 		plt.title("Score")
@@ -218,7 +218,7 @@ def main():
 
 	trainer = Reinforce_ADVANTAGE_agent(env=env, lr=lr, n_trajectories=n_trajectories, n_episodes=n_episodes, gamma=gamma, solved_reward=solved_reward, early_stopping_window=early_stopping_window, model_path=model_path)
 	trainer.train()
-	trainer.plot_rewards()
+	trainer.plot()
 	env.close()
 	env = gym.make('CartPole-v1', render_mode = "human")
 	trainer.test(env = env, n_episodes=5)
